@@ -1,8 +1,10 @@
+line-length = 88
+indent-width = 2
+
 [lint]
 select = ["E", "F", "I", "W"]
-ignore = ["E501"]
+ignore = ["E501", "W191"]
 
 [format]
 indent-style = "tab"
-indent-width = 2
 quote-style = "single"
