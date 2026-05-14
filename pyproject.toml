@@ -1,0 +1,14 @@
+[project]
+name = "sdn-drl-network-slicing"
+version = "0.1.0"
+description = "Autonomous SDN Network Slicing with Deep Reinforcement Learning - UMaT Final Year Project"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.12",
+]
