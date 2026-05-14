@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Campus network topology - three-tier wired backbone.
-Core (s1) -> Aggregation (s2, s3) -> Access (s4-s8)
+Campus network topology - three-tier with wireless access points.
+Core (s1) -> Aggregation (s2, s3) -> Access APs (ap1-ap5)
+One AP per slice: VLE, Student Portal, Admin, IoT, General Traffic
 """
 
 from mininet.log import info, setLogLevel
 from mininet.node import OVSSwitch, RemoteController
 from mn_wifi.cli import CLI
-from mn_wifi.link import WirelessLink
 from mn_wifi.net import Mininet_wifi
 
 
 def create_topology():
-    net = Mininet_wifi(switch=OVSSwitch, link=WirelessLink, controller=None)
+    net = Mininet_wifi(switch=OVSSwitch, controller=None)
 
     info("*** Adding remote controller\n")
     c0 = net.addController(
@@ -29,31 +29,80 @@ def create_topology():
     s2 = net.addSwitch("s2", protocols="OpenFlow13")
     s3 = net.addSwitch("s3", protocols="OpenFlow13")
 
-    info("*** Adding access switches\n")
-    s4 = net.addSwitch("s4", protocols="OpenFlow13")
-    s5 = net.addSwitch("s5", protocols="OpenFlow13")
-    s6 = net.addSwitch("s6", protocols="OpenFlow13")
-    s7 = net.addSwitch("s7", protocols="OpenFlow13")
-    s8 = net.addSwitch("s8", protocols="OpenFlow13")
+    info("*** Adding access points (one per slice)\n")
+    ap1 = net.addAccessPoint(
+        "ap1",
+        ssid="vle",
+        mode="g",
+        channel="1",
+        protocols="OpenFlow13",
+        failMode="managed",
+    )
+    ap2 = net.addAccessPoint(
+        "ap2",
+        ssid="student-portal",
+        mode="g",
+        channel="6",
+        protocols="OpenFlow13",
+        failMode="managed",
+    )
+    ap3 = net.addAccessPoint(
+        "ap3",
+        ssid="admin",
+        mode="g",
+        channel="11",
+        protocols="OpenFlow13",
+        failMode="managed",
+    )
+    ap4 = net.addAccessPoint(
+        "ap4",
+        ssid="iot",
+        mode="g",
+        channel="1",
+        protocols="OpenFlow13",
+        failMode="managed",
+    )
+    ap5 = net.addAccessPoint(
+        "ap5",
+        ssid="general",
+        mode="g",
+        channel="6",
+        protocols="OpenFlow13",
+        failMode="managed",
+    )
+
+    info("*** Configuring nodes\n")
+    net.configureNodes()
 
     info("*** Creating links\n")
+    # core to aggregation
     net.addLink(s1, s2)
     net.addLink(s1, s3)
-    net.addLink(s2, s4)
-    net.addLink(s2, s5)
-    net.addLink(s2, s6)
-    net.addLink(s3, s7)
-    net.addLink(s3, s8)
+
+    # aggregation to access APs
+    net.addLink(s2, ap1)
+    net.addLink(s2, ap2)
+    net.addLink(s2, ap3)
+    net.addLink(s3, ap4)
+    net.addLink(s3, ap5)
 
     info("*** Starting network\n")
-    net.start()
+    net.build()
+    c0.start()
+    s1.start([c0])
+    s2.start([c0])
+    s3.start([c0])
+    ap1.start([c0])
+    ap2.start([c0])
+    ap3.start([c0])
+    ap4.start([c0])
+    ap5.start([c0])
 
-    info("*** Verifying switch connections\n")
-    for sw in [s1, s2, s3, s4, s5, s6, s7, s8]:
-        info(f"    {sw.name}: dpid={sw.dpid}\n")
+    info("*** Verifying topology\n")
+    for node in [s1, s2, s3, ap1, ap2, ap3, ap4, ap5]:
+        info(f"    {node.name}: dpid={node.dpid}\n")
 
     info("*** Topology started successfully\n")
-    info("*** Press Ctrl+C or type 'exit' to stop\n")
     CLI(net)
 
     info("*** Stopping network\n")
