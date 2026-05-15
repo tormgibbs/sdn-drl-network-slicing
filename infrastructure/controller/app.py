@@ -5,10 +5,47 @@ Main entry point for the OS-Ken SDN controller.
 Handles OpenFlow 1.3 switch connections.
 """
 
+import json
+import os
+
+import yaml
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
 from os_ken.controller.handler import CONFIG_DISPATCHER, set_ev_cls
 from os_ken.ofproto import ofproto_v1_3
+
+from infrastructure.controller.flow_manager import (
+	get_ap_name,
+	get_ap_vlan,
+	install_aggregation_rules,
+	install_ap_rules,
+	install_core_rules,
+	install_table_miss,
+	is_aggregation,
+	is_ap,
+	is_core,
+	set_ap_vlan_map,
+	set_dpid_map,
+)
+
+DPID_MAP_PATH = 'config/dpid_map.json'
+SLICES_CONFIG_PATH = 'config/slices.yaml'
+
+
+def _load_dpid_map() -> dict[int, str]:
+	if not os.path.exists(DPID_MAP_PATH):
+		raise RuntimeError(
+			f'DPID map not found at {DPID_MAP_PATH}. Run the topology script first.'
+		)
+	with open(DPID_MAP_PATH) as f:
+		raw = json.load(f)
+	return {v: k for k, v in raw.items()}
+
+
+def _load_ap_vlan_map() -> dict[str, int]:
+	with open(SLICES_CONFIG_PATH) as f:
+		config = yaml.safe_load(f)
+	return {slice_cfg['ap']: slice_cfg['vlan'] for slice_cfg in config['slices'].values()}
 
 
 class CampusController(app_manager.OSKenApp):
@@ -17,29 +54,34 @@ class CampusController(app_manager.OSKenApp):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.logger.info('CampusController starting...')
+		self.dpid_to_name = _load_dpid_map()
+		self.logger.info('DPID map loaded: %s', self.dpid_to_name)
+		set_dpid_map(self.dpid_to_name)
+		set_ap_vlan_map(_load_ap_vlan_map())
 
 	@set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
 	def switch_features_handler(self, ev):
 		datapath = ev.msg.datapath
-		ofproto = datapath.ofproto
-		parser = datapath.ofproto_parser
+		dpid = datapath.id
+		if dpid is None:
+			return
+		name = self.dpid_to_name.get(dpid, f'unknown({dpid})')
+		self.logger.info('Switch connected: dpid=%s name=%s', dpid, name)
 
-		self.logger.info('Switch connected: dpid=%s', datapath.id)
-
-		# install table miss flow entry to forward unmatched packets to the controller
-		match = parser.OFPMatch()
-		actions = [
-			parser.OFPActionOutput(ofproto.OFPP_CONTROLLER, ofproto.OFPCML_NO_BUFFER)
-		]
-		self.add_flow(datapath, priority=0, match=match, actions=actions)
-
-	def add_flow(self, datapath, priority, match, actions):
-		ofproto = datapath.ofproto
-		parser = datapath.ofproto_parser
-
-		inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
-		mod = parser.OFPFlowMod(
-			datapath=datapath, priority=priority, match=match, instructions=inst
-		)
-		datapath.send_msg(mod)
-		self.logger.info('Flow installed on dpid=%s priority=%s', datapath.id, priority)
+		if is_core(dpid):
+			install_core_rules(datapath)
+		elif is_aggregation(dpid):
+			install_aggregation_rules(datapath)
+		elif is_ap(dpid):
+			ap_name = get_ap_name(dpid)
+			if ap_name is None:
+				self.logger.error('No AP name found for dpid=%s', dpid)
+				return
+			vlan_id = get_ap_vlan(ap_name)
+			if vlan_id is None:
+				self.logger.error('No VLAN configured for AP %s', ap_name)
+				return
+			install_ap_rules(datapath, ap_name, vlan_id)
+		else:
+			self.logger.warning('Unknown switch: dpid=%s', dpid)
+			install_table_miss(datapath)
