@@ -24,8 +24,7 @@ _dpid_role: dict[int, str] = {}
 
 
 def set_dpid_map(dpid_to_name: dict[int, str]) -> None:
-	global _dpid_role
-	_dpid_role = {}
+	_dpid_role.clear()
 	for dpid, name in dpid_to_name.items():
 		if name == 's1':
 			_dpid_role[dpid] = 'core'
@@ -37,8 +36,8 @@ def set_dpid_map(dpid_to_name: dict[int, str]) -> None:
 
 
 def set_ap_vlan_map(ap_vlan_map: dict[str, int]) -> None:
-	global _ap_vlan_map
-	_ap_vlan_map = ap_vlan_map
+	_ap_vlan_map.clear()
+	_ap_vlan_map.update(ap_vlan_map)
 	logger.info('AP VLAN map registered: %s', _ap_vlan_map)
 
 
