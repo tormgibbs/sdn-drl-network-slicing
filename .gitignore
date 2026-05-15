@@ -8,3 +8,5 @@ __pycache__/
 *.egg-info/
 dist/
 misc/
+config/dpid_map.json
+*.apconf

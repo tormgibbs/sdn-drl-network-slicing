@@ -22,10 +22,23 @@ Each access point represents a network slice:
 Two stations are attached to each access point.
 """
 
+import json
+import os
+
 from mininet.log import info, setLogLevel
 from mininet.node import OVSSwitch, RemoteController
 from mn_wifi.cli import CLI
 from mn_wifi.net import Mininet_wifi
+
+DPID_MAP_PATH = 'config/dpid_map.json'
+
+
+def _export_dpid_map(switches: list[OVSSwitch]):
+	data = {sw.name: int(sw.dpid, 16) for sw in switches}
+	os.makedirs(os.path.dirname(DPID_MAP_PATH), exist_ok=True)
+	with open(DPID_MAP_PATH, 'w') as f:
+		json.dump(data, f, indent=2)
+	info(f'*** DPID map written to {DPID_MAP_PATH}\n')
 
 
 def create_topology():
@@ -108,6 +121,9 @@ def create_topology():
 	# General Traffic slice stations
 	sta9 = net.addStation('sta9', ip='10.0.5.1/24')
 	sta10 = net.addStation('sta10', ip='10.0.5.2/24')
+
+	info('*** Exporting DPID map\n')
+	_export_dpid_map([s1, s2, s3, ap1, ap2, ap3, ap4, ap5])
 
 	info('*** Configuring nodes\n')
 	net.configureNodes()

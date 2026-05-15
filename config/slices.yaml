@@ -1,0 +1,51 @@
+slices:
+  vle:
+    vlan: 10
+    ssid: vle
+    ap: ap1
+    priority: 5
+    min_throughput_bps: 50_000_000
+    max_latency_ms: 100
+    max_loss_pct: 0.5
+
+  student_portal:
+    vlan: 20
+    ssid: student-portal
+    ap: ap2
+    priority: 4
+    min_throughput_bps: 25_000_000
+    max_latency_ms: 50
+    max_loss_pct: 0.1
+
+  admin:
+    vlan: 30
+    ssid: admin
+    ap: ap3
+    priority: 3
+    min_throughput_bps: 10_000_000
+    max_latency_ms: 150
+    max_loss_pct: 1.0
+
+  iot:
+    vlan: 40
+    ssid: iot
+    ap: ap4
+    priority: 2
+    min_throughput_bps: 64_000
+    max_latency_ms: 200
+    max_loss_pct: 5.0
+
+  general:
+    vlan: 50
+    ssid: general
+    ap: ap5
+    priority: 1
+    min_throughput_bps: 5_000_000
+    max_latency_ms: 500
+    max_loss_pct: 10.0
+
+network:
+  total_bandwidth_bps: 100_000_000
+  controller_host: 127.0.0.1
+  controller_port: 6633
+  api_port: 8080
