@@ -3,10 +3,15 @@
 # Three-tier campus network topology. Core (s1), aggregation (s2, s3), access (ap1-ap5).
 
 
+import sys
+from pathlib import Path
+
 from mininet.log import info, setLogLevel
 from mininet.node import OVSSwitch, RemoteController
 from mn_wifi.cli import CLI
 from mn_wifi.net import Mininet_wifi
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from infrastructure.topology.dpid_map import export_dpid_map
 

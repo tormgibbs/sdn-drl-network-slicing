@@ -5,6 +5,8 @@ topology:
 
 clean-topology:
 	sudo mn -c
+	sudo ovs-vsctl --all destroy QoS
+	sudo ovs-vsctl --all destroy Queue
 
 core-up:
 	cd infrastructure/free5gc && docker compose up -d
@@ -16,7 +18,7 @@ core-status:
 	cd infrastructure/free5gc && docker compose ps
 
 controller:
-	uv run infrastructure/controller/run.py
+	sudo $(shell which uv) run infrastructure/controller/run.py
 
 module-load:
 	sudo modprobe gtp5g

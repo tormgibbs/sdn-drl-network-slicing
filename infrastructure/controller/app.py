@@ -27,6 +27,7 @@ from infrastructure.controller.flow_manager import (
 	set_ap_vlan_map,
 	set_dpid_map,
 )
+from infrastructure.controller.queue_manager import create_htb_queue
 
 DPID_MAP_PATH = 'config/dpid_map.json'
 SLICES_CONFIG_PATH = 'config/slices.yaml'
@@ -62,9 +63,10 @@ class CampusController(app_manager.OSKenApp):
 	@set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
 	def switch_features_handler(self, ev):
 		datapath = ev.msg.datapath
-		dpid = datapath.id
+		dpid = ev.msg.datapath_id
 		if dpid is None:
 			return
+		datapath.id = dpid
 		name = self.dpid_to_name.get(dpid, f'unknown({dpid})')
 		self.logger.info('Switch connected: dpid=%s name=%s', dpid, name)
 
@@ -82,6 +84,7 @@ class CampusController(app_manager.OSKenApp):
 				self.logger.error('No VLAN configured for AP %s', ap_name)
 				return
 			install_ap_rules(datapath, ap_name, vlan_id)
+			create_htb_queue(ap_name)
 		else:
 			self.logger.warning('Unknown switch: dpid=%s', dpid)
 			install_table_miss(datapath)
