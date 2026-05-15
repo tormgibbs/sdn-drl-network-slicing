@@ -1,8 +1,25 @@
 #!/usr/bin/env python3
+# infrastructure/topology/campus_topology.py
 """
-Campus network topology - three-tier with wireless access points and stations.
-Core (s1) -> Aggregation (s2, s3) -> Access APs (ap1-ap5)
-Two stations per AP: src (traffic source) and sink (traffic sink)
+Campus network topology with a three tier architecture.
+
+Core layer:
+- s1
+
+Aggregation layer:
+- s2, s3
+
+Access layer:
+- ap1 to ap5
+
+Each access point represents a network slice:
+- vle
+- student-portal
+- admin
+- iot
+- general
+
+Two stations are attached to each access point.
 """
 
 from mininet.log import info, setLogLevel
@@ -36,7 +53,7 @@ def create_topology():
 		mode='g',
 		channel='1',
 		protocols='OpenFlow13',
-		failMode='managed',
+		failMode='secure',
 	)
 	ap2 = net.addAccessPoint(
 		'ap2',
@@ -44,7 +61,7 @@ def create_topology():
 		mode='g',
 		channel='6',
 		protocols='OpenFlow13',
-		failMode='managed',
+		failMode='secure',
 	)
 	ap3 = net.addAccessPoint(
 		'ap3',
@@ -52,7 +69,7 @@ def create_topology():
 		mode='g',
 		channel='11',
 		protocols='OpenFlow13',
-		failMode='managed',
+		failMode='secure',
 	)
 	ap4 = net.addAccessPoint(
 		'ap4',
@@ -60,7 +77,7 @@ def create_topology():
 		mode='g',
 		channel='1',
 		protocols='OpenFlow13',
-		failMode='managed',
+		failMode='secure',
 	)
 	ap5 = net.addAccessPoint(
 		'ap5',
@@ -68,7 +85,7 @@ def create_topology():
 		mode='g',
 		channel='6',
 		protocols='OpenFlow13',
-		failMode='managed',
+		failMode='secure',
 	)
 
 	info('*** Adding stations (source + sink per slice)\n')
@@ -120,16 +137,19 @@ def create_topology():
 	net.addLink(sta10, ap5)
 
 	info('*** Starting network\n')
-	net.build()
-	c0.start()
-	s1.start([c0])
-	s2.start([c0])
-	s3.start([c0])
-	ap1.start([c0])
-	ap2.start([c0])
-	ap3.start([c0])
-	ap4.start([c0])
-	ap5.start([c0])
+	net.start()
+
+	info('*** Associating stations\n')
+	sta1.cmd('iw dev sta1-wlan0 connect vle')
+	sta2.cmd('iw dev sta2-wlan0 connect vle')
+	sta3.cmd('iw dev sta3-wlan0 connect student-portal')
+	sta4.cmd('iw dev sta4-wlan0 connect student-portal')
+	sta5.cmd('iw dev sta5-wlan0 connect admin')
+	sta6.cmd('iw dev sta6-wlan0 connect admin')
+	sta7.cmd('iw dev sta7-wlan0 connect iot')
+	sta8.cmd('iw dev sta8-wlan0 connect iot')
+	sta9.cmd('iw dev sta9-wlan0 connect general')
+	sta10.cmd('iw dev sta10-wlan0 connect general')
 
 	info('*** Verifying topology\n')
 	for node in [s1, s2, s3, ap1, ap2, ap3, ap4, ap5]:

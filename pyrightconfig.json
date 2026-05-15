@@ -1,6 +1,10 @@
 {
-  "extraPaths": [
-    "/usr/local/lib/python3.14/dist-packages/mininet_wifi-2.7-py3.14.egg",
-    "/usr/local/lib/python3.14/dist-packages",
-  ],
+	"extraPaths": [
+		"/usr/local/lib/python3.14/dist-packages/mininet_wifi-2.7-py3.14.egg",
+		"/usr/local/lib/python3.14/dist-packages",
+	],
+	"reportUnknownMemberType": "none",
+	"reportUnknownVariableType": "none",
+	"reportUnknownArgumentType": "none",
+	"reportAttributeAccessIssue": "none",
 }
