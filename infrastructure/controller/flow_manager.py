@@ -64,6 +64,11 @@ def get_ap_vlan(ap_name: str) -> int | None:
 	return _ap_vlan_map.get(ap_name)
 
 
+def reset_state() -> None:
+	_dpid_role.clear()
+	_ap_vlan_map.clear()
+
+
 def install_ap_rules(datapath: object, ap_name: str, vlan_id: int) -> None:
 	ofp = datapath.ofproto
 	ofp_parser = datapath.ofproto_parser

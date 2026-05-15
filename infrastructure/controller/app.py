@@ -32,7 +32,7 @@ DPID_MAP_PATH = 'config/dpid_map.json'
 SLICES_CONFIG_PATH = 'config/slices.yaml'
 
 
-def _load_dpid_map() -> dict[int, str]:
+def load_dpid_map() -> dict[int, str]:
 	if not os.path.exists(DPID_MAP_PATH):
 		raise RuntimeError(
 			f'DPID map not found at {DPID_MAP_PATH}. Run the topology script first.'
@@ -42,7 +42,7 @@ def _load_dpid_map() -> dict[int, str]:
 	return {v: k for k, v in raw.items()}
 
 
-def _load_ap_vlan_map() -> dict[str, int]:
+def load_ap_vlan_map() -> dict[str, int]:
 	with open(SLICES_CONFIG_PATH) as f:
 		config = yaml.safe_load(f)
 	return {slice_cfg['ap']: slice_cfg['vlan'] for slice_cfg in config['slices'].values()}
@@ -54,10 +54,10 @@ class CampusController(app_manager.OSKenApp):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.logger.info('CampusController starting...')
-		self.dpid_to_name = _load_dpid_map()
+		self.dpid_to_name = load_dpid_map()
 		self.logger.info('DPID map loaded: %s', self.dpid_to_name)
 		set_dpid_map(self.dpid_to_name)
-		set_ap_vlan_map(_load_ap_vlan_map())
+		set_ap_vlan_map(load_ap_vlan_map())
 
 	@set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
 	def switch_features_handler(self, ev):

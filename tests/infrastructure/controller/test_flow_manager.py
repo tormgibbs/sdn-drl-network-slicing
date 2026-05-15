@@ -29,11 +29,9 @@ SAMPLE_VLAN_MAP = {
 
 @pytest.fixture(autouse=True)
 def reset_state():
-	fm._dpid_role.clear()
-	fm._ap_vlan_map.clear()
+	fm.reset_state()
 	yield
-	fm._dpid_role.clear()
-	fm._ap_vlan_map.clear()
+	fm.reset_state()
 
 
 @pytest.fixture
@@ -90,7 +88,6 @@ class TestApNameLookup:
 
 class TestVlanLookup:
 	def test_get_ap_vlan_returns_correct_vlan(self, loaded_maps):
-		print(fm._ap_vlan_map)
 		assert fm.get_ap_vlan('ap1') == 10
 		assert fm.get_ap_vlan('ap5') == 50
 
