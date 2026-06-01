@@ -1,5 +1,4 @@
-# Setup Guide: Autonomous SDN Slicing with Deep Reinforcement Learning
-## University of Mines and Technology (UMaT) — Final Year Thesis Project
+# Setup Guide
 
 ## 1. Hardware and OS Requirements
 
