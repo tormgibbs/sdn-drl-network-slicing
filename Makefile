@@ -23,6 +23,7 @@ controller:
 module-load:
 	sudo modprobe gtp5g
 	sudo modprobe mac80211_hwsim
+	lsmod | grep -E "gtp5g|mac80211_hwsim"
 
 test:
 	uv run pytest tests/ -v
