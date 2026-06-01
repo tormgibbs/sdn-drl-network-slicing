@@ -1,21 +1,25 @@
 # infrastructure/controller/queue_manager.py
 # Creates and updates HTB QoS queues on AP uplink ports via ovs-vsctl.
-
 import logging
 import subprocess
+from pathlib import Path
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
-TOTAL_BW_BPS = 100_000_000  # 100 Mbps total per AP uplink
+_SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
 
-# Minimum guaranteed bandwidth per slice in bps (HTB floor)
-SLICE_MIN_BPS: dict[str, int] = {
-	'ap1': 50_000_000,
-	'ap2': 25_000_000,
-	'ap3': 10_000_000,
-	'ap4': 64_000,
-	'ap5': 5_000_000,
-}
+
+def _load_config() -> tuple[int, dict[str, int]]:
+	with open(_SLICES_CONFIG) as f:
+		config = yaml.safe_load(f)
+	total_bw = config['network']['total_bandwidth_bps']
+	min_rates = {
+		slice_cfg['ap']: slice_cfg['min_throughput_bps']
+		for slice_cfg in config['slices'].values()
+	}
+	return total_bw, min_rates
 
 
 def _uplink_port(ap_name: str) -> str:
@@ -30,16 +34,16 @@ def _run(cmd: str) -> str:
 
 
 def create_htb_queue(ap_name: str) -> None:
+	total_bw, min_rates = _load_config()
 	port = _uplink_port(ap_name)
-	min_bps = SLICE_MIN_BPS.get(ap_name, 5_000_000)
-
+	min_bps = min_rates.get(ap_name, 5_000_000)
 	_run(
 		f'ovs-vsctl -- --id=@qos create QoS type=linux-htb '
-		f'other-config:max-rate={TOTAL_BW_BPS} '
+		f'other-config:max-rate={total_bw} '
 		f'queues:1=@q1 '
 		f'-- --id=@q1 create Queue '
 		f'other-config:min-rate={min_bps} '
-		f'other-config:max-rate={TOTAL_BW_BPS} '
+		f'other-config:max-rate={total_bw} '
 		f'-- set Port {port} qos=@qos'
 	)
 	logger.info('HTB queue created: ap=%s port=%s min=%s bps', ap_name, port, min_bps)
