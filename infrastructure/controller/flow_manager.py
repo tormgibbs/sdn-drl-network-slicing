@@ -2,7 +2,9 @@
 # Installs OpenFlow 1.3 flow rules for VLAN-based slice classification.
 
 import logging
+from pathlib import Path
 
+import yaml
 from os_ken.ofproto import ofproto_v1_3 as ofproto
 from os_ken.ofproto import ofproto_v1_3_parser as parser
 
@@ -21,6 +23,21 @@ AP_UPLINK_PORT = 2
 
 _ap_vlan_map: dict[str, int] = {}
 _dpid_role: dict[int, str] = {}
+_subnet_vlan_map: dict[str, int] = {}
+
+_SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
+
+
+def _load_subnet_vlan_map() -> dict[str, int]:
+	with open(_SLICES_CONFIG) as f:
+		config = yaml.safe_load(f)
+	result = {}
+	for slice_cfg in config['slices'].values():
+		subnet = slice_cfg.get('ue_subnet')
+		vlan = slice_cfg.get('vlan')
+		if subnet and vlan:
+			result[subnet] = vlan
+	return result
 
 
 def set_dpid_map(dpid_to_name: dict[int, str]) -> None:
@@ -38,7 +55,10 @@ def set_dpid_map(dpid_to_name: dict[int, str]) -> None:
 def set_ap_vlan_map(ap_vlan_map: dict[str, int]) -> None:
 	_ap_vlan_map.clear()
 	_ap_vlan_map.update(ap_vlan_map)
+	_subnet_vlan_map.clear()
+	_subnet_vlan_map.update(_load_subnet_vlan_map())
 	logger.info('AP VLAN map registered: %s', _ap_vlan_map)
+	logger.info('Subnet VLAN map loaded: %s', _subnet_vlan_map)
 
 
 def is_core(dpid: int) -> bool:
@@ -67,6 +87,7 @@ def get_ap_vlan(ap_name: str) -> int | None:
 def reset_state() -> None:
 	_dpid_role.clear()
 	_ap_vlan_map.clear()
+	_subnet_vlan_map.clear()
 
 
 def install_ap_rules(datapath: object, ap_name: str, vlan_id: int) -> None:
@@ -121,10 +142,53 @@ def install_core_rules(datapath: object) -> None:
 	logger.info('Core rules installed: dpid=%s', datapath.id)
 
 
+def install_upf_ingress_rules(datapath: object) -> None:
+	"""
+	Install IP-to-VLAN classification rules on s1 for traffic arriving from UPF.
+	Matches on source IP subnet per slice, pushes the correct VLAN tag, floods
+	to aggregation switches. Called once at controller startup for s1 only.
+	"""
+	if not _subnet_vlan_map:
+		logger.warning('Subnet VLAN map is empty -- skipping UPF ingress rules')
+		return
+
+	ofp = datapath.ofproto
+	ofp_parser = datapath.ofproto_parser
+
+	for subnet, vlan_id in _subnet_vlan_map.items():
+		ip_address, prefix_len = subnet.split('/')
+		match = ofp_parser.OFPMatch(
+			eth_type=0x0800,
+			ipv4_src=(ip_address, _prefix_to_mask(int(prefix_len))),
+		)
+		actions = [
+			ofp_parser.OFPActionPushVlan(0x8100),
+			ofp_parser.OFPActionSetField(vlan_vid=(vlan_id | ofproto.OFPVID_PRESENT)),
+			ofp_parser.OFPActionOutput(ofp.OFPP_FLOOD),
+		]
+		_add_flow(datapath, priority=20, match=match, actions=actions)
+		logger.info(
+			'UPF ingress rule installed: dpid=%s subnet=%s vlan=%s',
+			datapath.id,
+			subnet,
+			vlan_id,
+		)
+
+
 def install_table_miss(datapath: object) -> None:
 	match = parser.OFPMatch()
 	_add_flow(datapath, priority=0, match=match, actions=[])
 	logger.debug('Table-miss installed on dpid=%s', datapath.id)
+
+
+def _prefix_to_mask(prefix_len: int) -> str:
+	mask = (0xFFFFFFFF >> (32 - prefix_len)) << (32 - prefix_len)
+	return '{}.{}.{}.{}'.format(
+		(mask >> 24) & 0xFF,
+		(mask >> 16) & 0xFF,
+		(mask >> 8) & 0xFF,
+		mask & 0xFF,
+	)
 
 
 def _add_flow(

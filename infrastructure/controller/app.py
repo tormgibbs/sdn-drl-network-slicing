@@ -21,6 +21,7 @@ from infrastructure.controller.flow_manager import (
 	install_ap_rules,
 	install_core_rules,
 	install_table_miss,
+	install_upf_ingress_rules,
 	is_aggregation,
 	is_ap,
 	is_core,
@@ -72,6 +73,7 @@ class CampusController(app_manager.OSKenApp):
 
 		if is_core(dpid):
 			install_core_rules(datapath)
+			install_upf_ingress_rules(datapath)
 		elif is_aggregation(dpid):
 			install_aggregation_rules(datapath)
 		elif is_ap(dpid):
