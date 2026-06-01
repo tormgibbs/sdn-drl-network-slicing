@@ -1,0 +1,60 @@
+topology:
+  switches:
+    s1:
+      role: core
+      dpid: null  # populated at runtime from dpid_map.json
+    s2:
+      role: aggregation
+      dpid: null
+    s3:
+      role: aggregation
+      dpid: null
+    ap1:
+      role: access
+      dpid: null
+    ap2:
+      role: access
+      dpid: null
+    ap3:
+      role: access
+      dpid: null
+    ap4:
+      role: access
+      dpid: null
+    ap5:
+      role: access
+      dpid: null
+
+  aggregation_map:
+    s2:
+      - ap1
+      - ap2
+      - ap3
+    s3:
+      - ap4
+      - ap5
+
+  ap_slice_map:
+    ap1: vle
+    ap2: student_portal
+    ap3: admin
+    ap4: iot
+    ap5: general
+
+  links:
+    core_to_aggregation:
+      - [s1, s2]
+      - [s1, s3]
+    aggregation_to_access:
+      - [s2, ap1]
+      - [s2, ap2]
+      - [s2, ap3]
+      - [s3, ap4]
+      - [s3, ap5]
+
+  link_capacity_bps: 100_000_000
+
+controller:
+  host: 127.0.0.1
+  port: 6633
+  stats_interval_sec: 5

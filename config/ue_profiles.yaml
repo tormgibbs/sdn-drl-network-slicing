@@ -1,0 +1,60 @@
+ue_profiles:
+  ue1:
+    imsi: "208930000000001"
+    key: "8baf473f2f8fd09487cccbd7097c6862"
+    op: "8e27b6af0e692e750f32667a3b14605d"
+    op_type: OPC
+    slice: vle
+    sst: 1
+    sd: "000001"
+    ip: 10.60.1.1
+    subnet: 10.60.1.0/24
+    config_file: uecfg-ue1.yaml
+
+  ue2:
+    imsi: "208930000000002"
+    key: "8baf473f2f8fd09487cccbd7097c6862"
+    op: "8e27b6af0e692e750f32667a3b14605d"
+    op_type: OPC
+    slice: student_portal
+    sst: 1
+    sd: "000002"
+    ip: 10.60.2.1
+    subnet: 10.60.2.0/24
+    config_file: uecfg-ue2.yaml
+
+  ue3:
+    imsi: "208930000000003"
+    key: "8baf473f2f8fd09487cccbd7097c6862"
+    op: "8e27b6af0e692e750f32667a3b14605d"
+    op_type: OPC
+    slice: admin
+    sst: 1
+    sd: "000003"
+    ip: 10.60.3.1
+    subnet: 10.60.3.0/24
+    config_file: uecfg-ue3.yaml
+
+  ue4:
+    imsi: "208930000000004"
+    key: "8baf473f2f8fd09487cccbd7097c6862"
+    op: "8e27b6af0e692e750f32667a3b14605d"
+    op_type: OPC
+    slice: iot
+    sst: 2
+    sd: "000004"
+    ip: 10.60.4.1
+    subnet: 10.60.4.0/24
+    config_file: uecfg-ue4.yaml
+
+  ue5:
+    imsi: "208930000000005"
+    key: "8baf473f2f8fd09487cccbd7097c6862"
+    op: "8e27b6af0e692e750f32667a3b14605d"
+    op_type: OPC
+    slice: general
+    sst: 1
+    sd: "000005"
+    ip: 10.60.5.1
+    subnet: 10.60.5.0/24
+    config_file: uecfg-ue5.yaml

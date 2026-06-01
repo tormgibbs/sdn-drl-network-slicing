@@ -4,6 +4,9 @@ slices:
     ssid: vle
     ap: ap1
     priority: 5
+    sst: 1
+    sd: "000001"
+    ue_subnet: 10.60.1.0/24
     min_throughput_bps: 50_000_000
     max_latency_ms: 100
     max_loss_pct: 0.5
@@ -13,6 +16,9 @@ slices:
     ssid: student-portal
     ap: ap2
     priority: 4
+    sst: 1
+    sd: "000002"
+    ue_subnet: 10.60.2.0/24
     min_throughput_bps: 25_000_000
     max_latency_ms: 50
     max_loss_pct: 0.1
@@ -22,6 +28,9 @@ slices:
     ssid: admin
     ap: ap3
     priority: 3
+    sst: 1
+    sd: "000003"
+    ue_subnet: 10.60.3.0/24
     min_throughput_bps: 10_000_000
     max_latency_ms: 150
     max_loss_pct: 1.0
@@ -31,6 +40,9 @@ slices:
     ssid: iot
     ap: ap4
     priority: 2
+    sst: 2
+    sd: "000004"
+    ue_subnet: 10.60.4.0/24
     min_throughput_bps: 64_000
     max_latency_ms: 200
     max_loss_pct: 5.0
@@ -40,6 +52,9 @@ slices:
     ssid: general
     ap: ap5
     priority: 1
+    sst: 1
+    sd: "000005"
+    ue_subnet: 10.60.5.0/24
     min_throughput_bps: 5_000_000
     max_latency_ms: 500
     max_loss_pct: 10.0
