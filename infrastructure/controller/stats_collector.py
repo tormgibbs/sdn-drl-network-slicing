@@ -1,0 +1,134 @@
+# infrastructure/controller/stats_collector.py
+# Collects OpenFlow port statistics from aggregation switches and maintains a per-slice cache.
+# Designed for non-blocking reads by REST layer; sampling is periodic and eventual-consistency based.
+
+import logging
+import threading
+import time
+from pathlib import Path
+
+import yaml
+from os_ken.lib import hub
+
+logger = logging.getLogger(__name__)
+
+_TOPOLOGY_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'topology.yaml'
+_SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
+
+
+_stats_cache: dict[str, dict] = {}
+_cache_lock = threading.Lock()
+_datapaths: dict[str, object] = {}
+_running = False
+_interval_sec: int = 5
+
+
+_prev_bytes: dict[str, int] = {}
+_prev_time: dict[str, float] = {}
+
+
+def _load_topology() -> dict:
+	with open(_TOPOLOGY_CONFIG) as f:
+		return yaml.safe_load(f)
+
+
+def _load_slices() -> dict:
+	with open(_SLICES_CONFIG) as f:
+		return yaml.safe_load(f)
+
+
+def register_datapath(switch_name: str, datapath: object) -> None:
+	_datapaths[switch_name] = datapath
+	logger.info('Stats collector: datapath registered: %s', switch_name)
+
+
+def get_stats() -> dict[str, dict]:
+	with _cache_lock:
+		return dict(_stats_cache)
+
+
+def start(interval_sec: int = 5) -> None:
+	global _running, _interval_sec
+	_interval_sec = interval_sec
+	_running = True
+	hub.spawn(_collection_loop)
+	logger.info('Stats collector started, interval=%ds', interval_sec)
+
+
+def stop() -> None:
+	global _running
+	_running = False
+	logger.info('Stats collector stopped')
+
+
+def _collection_loop() -> None:
+	while _running:
+		_request_stats()
+		hub.sleep(_interval_sec)
+
+
+def _request_stats() -> None:
+	topology = _load_topology()
+	aggregation_ports = topology['topology']['aggregation_ports']
+	ap_slice_map = topology['topology']['ap_slice_map']
+
+	for switch_name, ap_ports in aggregation_ports.items():
+		datapath = _datapaths.get(switch_name)
+		if datapath is None:
+			logger.warning('Stats collector: datapath not available for %s', switch_name)
+			continue
+
+		ofp_parser = datapath.ofproto_parser
+		req = ofp_parser.OFPPortStatsRequest(datapath, 0, datapath.ofproto.OFPP_ANY)
+		datapath.send_msg(req)
+
+
+def handle_port_stats_reply(switch_name: str, stats: list) -> None:
+	topology = _load_topology()
+	aggregation_ports = topology['topology']['aggregation_ports']
+	ap_slice_map = topology['topology']['ap_slice_map']
+
+	switch_ports = aggregation_ports.get(switch_name)
+	if switch_ports is None:
+		return
+
+	port_slice_map: dict[int, str] = {}
+	for ap_name, port_no in switch_ports.items():
+		slice_name = ap_slice_map.get(ap_name)
+		if slice_name:
+			port_slice_map[port_no] = slice_name
+
+	now = time.time()
+
+	for stat in stats:
+		slice_name = port_slice_map.get(stat.port_no)
+		if slice_name is None:
+			continue
+
+		tx_bytes = stat.tx_bytes
+		cache_key = f'{switch_name}:{stat.port_no}'
+
+		prev_bytes = _prev_bytes.get(cache_key, 0)
+		prev_time = _prev_time.get(cache_key, now)
+		elapsed = now - prev_time
+		if elapsed > 0:
+			throughput_bps = ((tx_bytes - prev_bytes) * 8) / elapsed
+		else:
+			throughput_bps = 0.0
+
+		_prev_bytes[cache_key] = tx_bytes
+		_prev_time[cache_key] = now
+
+		with _cache_lock:
+			_stats_cache[slice_name] = {
+				'tx_bytes': tx_bytes,
+				'rx_bytes': stat.rx_bytes,
+				'tx_packets': stat.tx_packets,
+				'rx_packets': stat.rx_packets,
+				'tx_errors': stat.tx_errors,
+				'rx_errors': stat.rx_errors,
+				'duration_sec': stat.duration_sec,
+				'throughput_bps': max(0.0, throughput_bps),
+			}
+
+	logger.debug('Stats cache updated for switch=%s', switch_name)
