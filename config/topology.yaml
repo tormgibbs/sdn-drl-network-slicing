@@ -34,6 +34,15 @@ topology:
       - ap4
       - ap5
 
+  aggregation_ports:
+    s2:
+      ap1: 2
+      ap2: 3
+      ap3: 4
+    s3:
+      ap4: 2
+      ap5: 3
+
   ap_slice_map:
     ap1: vle
     ap2: student_portal

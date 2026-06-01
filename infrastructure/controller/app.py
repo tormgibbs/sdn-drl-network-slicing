@@ -28,6 +28,7 @@ from infrastructure.controller.flow_manager import (
 	set_ap_vlan_map,
 	set_dpid_map,
 )
+from infrastructure.controller.meter_manager import register_datapath
 from infrastructure.controller.queue_manager import create_htb_queue
 
 DPID_MAP_PATH = 'config/dpid_map.json'
@@ -76,6 +77,7 @@ class CampusController(app_manager.OSKenApp):
 			install_upf_ingress_rules(datapath)
 		elif is_aggregation(dpid):
 			install_aggregation_rules(datapath)
+			register_datapath(name, datapath)
 		elif is_ap(dpid):
 			ap_name = get_ap_name(dpid)
 			if ap_name is None:
