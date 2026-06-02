@@ -117,10 +117,10 @@ class TestFlowInstallation:
 		fm.install_aggregation_rules(dp)
 		assert dp.send_msg.call_count == 1
 
-	def test_install_core_rules_sends_one_flow(self, loaded_maps):
+	def test_install_core_rules_sends_correct_flows(self, loaded_maps):
 		dp = self._make_datapath(dpid=1)
 		fm.install_core_rules(dp)
-		assert dp.send_msg.call_count == 1
+		assert dp.send_msg.call_count == 6
 
 	def test_install_table_miss_sends_one_flow(self, loaded_maps):
 		dp = self._make_datapath()

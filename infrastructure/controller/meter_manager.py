@@ -1,6 +1,4 @@
 # infrastructure/controller/meter_manager.py
-# Installs and updates OpenFlow meters on aggregation switches (s2, s3).
-# Meters enforce dynamic per-slice bandwidth ceilings set by the DRL agent.
 
 import logging
 from pathlib import Path
@@ -12,10 +10,8 @@ logger = logging.getLogger(__name__)
 _TOPOLOGY_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'topology.yaml'
 _SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
 
-# Meter ID assigned per AP port on each aggregation switch.
-# Meter IDs must be unique per datapath.
-# s2: ap1=1, ap2=2, ap3=3
-# s3: ap4=1, ap5=2
+# Meter IDs are datapath-scoped. ap4 and ap1 can share ID 1 because they
+# are on different switches (s3 and s2 respectively).
 _METER_ID_BY_AP: dict[str, int] = {
 	'ap1': 1,
 	'ap2': 2,
@@ -24,8 +20,11 @@ _METER_ID_BY_AP: dict[str, int] = {
 	'ap5': 2,
 }
 
-# Cache of datapath objects keyed by switch name, populated by app.py
+_AGGREGATION_SWITCHES = frozenset({'s2', 's3'})
+
 _datapaths: dict[str, object] = {}
+_current_allocations: dict[str, float] = {}
+_initialized: bool = False
 
 
 def _load_topology() -> dict:
@@ -42,14 +41,28 @@ def register_datapath(switch_name: str, datapath: object) -> None:
 	_datapaths[switch_name] = datapath
 	logger.info('Datapath registered: %s', switch_name)
 
+	if _AGGREGATION_SWITCHES.issubset(_datapaths.keys()):
+		logger.info('All aggregation switches registered -- installing default meters')
+		_install_default_meters()
+
+
+def _install_default_meters() -> None:
+	slices = _load_slices()
+	slice_names = list(slices['slices'].keys())
+	equal_share = 1.0 / len(slice_names)
+	install_meters({name: equal_share for name in slice_names})
+
 
 def install_meters(allocations: dict[str, float]) -> None:
 	"""
-	Install or update OpenFlow meters on s2 and s3 based on DRL allocations.
+	Install or replace OpenFlow meters on s2 and s3.
 
-	allocations: dict mapping slice name to fraction of total bandwidth.
-	Example: {'vle': 0.4, 'student_portal': 0.2, 'admin': 0.15, 'iot': 0.05, 'general': 0.2}
-	Fractions must sum to 1.0.
+	allocations maps slice name to a fraction of total bandwidth [0.0, 1.0].
+	Rate is floored at min_throughput_bps regardless of the allocated fraction.
+
+	Meters match on vlan_vid + in_port in both directions -- AP-facing ingress
+	(uplink) and core-facing ingress (downlink) -- so the ceiling applies to
+	the full slice traffic budget.
 	"""
 	topology = _load_topology()
 	slices = _load_slices()
@@ -58,100 +71,105 @@ def install_meters(allocations: dict[str, float]) -> None:
 	ap_slice_map = topology['topology']['ap_slice_map']
 	aggregation_ports = topology['topology']['aggregation_ports']
 
-	# Build slice -> AP mapping (inverse of ap_slice_map)
-	slice_ap_map = {v: k for k, v in ap_slice_map.items()}
-
-	for switch_name, ap_ports in aggregation_ports.items():
+	for switch_name, port_config in aggregation_ports.items():
 		datapath = _datapaths.get(switch_name)
 		if datapath is None:
-			logger.error('Datapath not registered for switch %s', switch_name)
+			logger.error('install_meters called but datapath not registered: %s', switch_name)
 			continue
 
-		for ap_name, port_no in ap_ports.items():
+		core_port = port_config['core_port']
+		ap_ports = port_config['ap_ports']
+
+		metered_vlans: set[int] = set()
+
+		for ap_name, ap_port_no in ap_ports.items():
 			slice_name = ap_slice_map.get(ap_name)
 			if slice_name is None:
-				logger.error('No slice mapped to AP %s', ap_name)
+				logger.error('No slice mapped to AP %s in topology config', ap_name)
 				continue
 
+			slice_cfg = slices['slices'][slice_name]
+			vlan_id = slice_cfg['vlan']
 			fraction = allocations.get(slice_name, 0.0)
 			rate_bps = int(fraction * total_bw)
-
-			# Enforce minimum floor -- never set meter below slice min_throughput
-			min_bps = slices['slices'][slice_name]['min_throughput_bps']
-			rate_bps = max(rate_bps, min_bps)
+			min_bps = slice_cfg['min_throughput_bps']
+			rate_bps = max(rate_bps, min_bps)  # floor at SLA minimum regardless of allocation
 
 			meter_id = _METER_ID_BY_AP[ap_name]
-			_install_or_update_meter(datapath, meter_id, port_no, rate_bps)
+			_replace_meter(datapath, meter_id, rate_bps)
+
+			_install_meter_flow(datapath, meter_id, vlan_id, ap_port_no)
+
+			if vlan_id not in metered_vlans:
+				_install_meter_flow(datapath, meter_id, vlan_id, core_port)
+				metered_vlans.add(vlan_id)
+
 			logger.info(
-				'Meter updated: switch=%s ap=%s slice=%s port=%d meter_id=%d rate=%d bps',
+				'Meter installed: switch=%s slice=%s vlan=%d meter_id=%d rate=%d bps',
 				switch_name,
-				ap_name,
 				slice_name,
-				port_no,
+				vlan_id,
 				meter_id,
 				rate_bps,
 			)
 
 
-def _install_or_update_meter(
-	datapath: object, meter_id: int, port_no: int, rate_kbps_or_bps: int
-) -> None:
+def _replace_meter(datapath: object, meter_id: int, rate_bps: int) -> None:
 	ofp = datapath.ofproto
 	ofp_parser = datapath.ofproto_parser
 
-	# OpenFlow meter rates are in kbps
-	rate_kbps = max(1, rate_kbps_or_bps // 1000)
-
-	bands = [
-		ofp_parser.OFPMeterBandDrop(
-			type_=ofp.OFPMBT_DROP,
-			rate=rate_kbps,
-			burst_size=0,
+	# Delete before add -- OFPMC_MODIFY silently fails on non-existent meters in OVS.
+	datapath.send_msg(
+		ofp_parser.OFPMeterMod(
+			datapath=datapath,
+			command=ofp.OFPMC_DELETE,
+			flags=ofp.OFPMF_KBPS,
+			meter_id=meter_id,
+			bands=[],
 		)
-	]
-
-	# OFPMC_ADD on first install, OFPMC_MODIFY on update.
-	# Using OFPMC_MODIFY on a non-existent meter will fail silently on some
-	# OVS versions. Send ADD first, ignore error if meter already exists,
-	# then use MODIFY for subsequent updates. Simplest approach: always DELETE
-	# then ADD to guarantee clean state.
-	_delete_meter(datapath, meter_id)
-
-	meter_mod = ofp_parser.OFPMeterMod(
-		datapath=datapath,
-		command=ofp.OFPMC_ADD,
-		flags=ofp.OFPMF_KBPS,
-		meter_id=meter_id,
-		bands=bands,
 	)
-	datapath.send_msg(meter_mod)
 
-	# Install flow rule to apply meter to traffic on this port
-	match = ofp_parser.OFPMatch(in_port=port_no)
+	rate_kbps = max(1, rate_bps // 1000)
+	datapath.send_msg(
+		ofp_parser.OFPMeterMod(
+			datapath=datapath,
+			command=ofp.OFPMC_ADD,
+			flags=ofp.OFPMF_KBPS,
+			meter_id=meter_id,
+			bands=[
+				ofp_parser.OFPMeterBandDrop(
+					type_=ofp.OFPMBT_DROP,
+					rate=rate_kbps,
+					burst_size=0,
+				)
+			],
+		)
+	)
+
+
+def _install_meter_flow(
+	datapath: object, meter_id: int, vlan_id: int, port_no: int
+) -> None:
+	ofp = datapath.ofproto
+	ofp_parser = datapath.ofproto_parser
+	# Meter-only instructions drop on OVS — verified on this deployment.
+	# Forwarding action must be explicit. FLOOD preserves single-table pipeline
+	# without requiring goto-table or duplicate forwarding logic.
 	inst = [
 		ofp_parser.OFPInstructionMeter(meter_id),
 		ofp_parser.OFPInstructionActions(
 			ofp.OFPIT_APPLY_ACTIONS,
-			[ofp_parser.OFPActionOutput(ofp.OFPP_NORMAL)],
+			[ofp_parser.OFPActionOutput(ofp.OFPP_FLOOD)],
 		),
 	]
-	flow_mod = ofp_parser.OFPFlowMod(
-		datapath=datapath,
-		priority=15,
-		match=match,
-		instructions=inst,
+	datapath.send_msg(
+		ofp_parser.OFPFlowMod(
+			datapath=datapath,
+			priority=15,
+			match=ofp_parser.OFPMatch(
+				in_port=port_no,
+				vlan_vid=(vlan_id | 0x1000),
+			),
+			instructions=inst,
+		)
 	)
-	datapath.send_msg(flow_mod)
-
-
-def _delete_meter(datapath: object, meter_id: int) -> None:
-	ofp = datapath.ofproto
-	ofp_parser = datapath.ofproto_parser
-	meter_mod = ofp_parser.OFPMeterMod(
-		datapath=datapath,
-		command=ofp.OFPMC_DELETE,
-		flags=ofp.OFPMF_KBPS,
-		meter_id=meter_id,
-		bands=[],
-	)
-	datapath.send_msg(meter_mod)

@@ -26,6 +26,7 @@ _dpid_role: dict[int, str] = {}
 _subnet_vlan_map: dict[str, int] = {}
 
 _SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
+_TOPOLOGY_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'topology.yaml'
 
 
 def _load_subnet_vlan_map() -> dict[str, int]:
@@ -38,6 +39,11 @@ def _load_subnet_vlan_map() -> dict[str, int]:
 		if subnet and vlan:
 			result[subnet] = vlan
 	return result
+
+
+def _load_topology() -> dict:
+	with open(_TOPOLOGY_CONFIG) as f:
+		return yaml.safe_load(f)
 
 
 def set_dpid_map(dpid_to_name: dict[int, str]) -> None:
@@ -91,7 +97,6 @@ def reset_state() -> None:
 
 
 def install_ap_rules(datapath: object, ap_name: str, vlan_id: int) -> None:
-	ofp = datapath.ofproto
 	ofp_parser = datapath.ofproto_parser
 
 	match_untagged = ofp_parser.OFPMatch(
@@ -132,8 +137,43 @@ def install_aggregation_rules(datapath: object) -> None:
 
 
 def install_core_rules(datapath: object) -> None:
+	"""
+	Install VLAN-aware forwarding rules on s1.
+
+	Tagged frames are flooded to reach both aggregation switches and directly
+	connected hosts (h1). Tags are preserved end-to-end so downstream meter
+	flows on s2/s3 can match on vlan_vid.
+	"""
+
 	ofp = datapath.ofproto
 	ofp_parser = datapath.ofproto_parser
+
+	topology = _load_topology()
+
+	aggregation_ports = topology['topology']['aggregation_ports']
+	ap_slice_map = topology['topology']['ap_slice_map']
+
+	with open(_SLICES_CONFIG) as f:
+		slices_config = yaml.safe_load(f)['slices']
+
+	vlan_ids: set[int] = set()
+	for port_config in aggregation_ports.values():
+		for ap_name in port_config['ap_ports']:
+			slice_name = ap_slice_map.get(ap_name)
+			if slice_name:
+				vlan_ids.add(slices_config[slice_name]['vlan'])
+
+	for vlan_id in vlan_ids:
+		match = ofp_parser.OFPMatch(
+			vlan_vid=(vlan_id | ofproto.OFPVID_PRESENT),
+		)
+		actions = [ofp_parser.OFPActionOutput(ofp.OFPP_FLOOD)]
+		_add_flow(datapath, priority=10, match=match, actions=actions)
+		logger.info(
+			'Core VLAN rule installed: dpid=%s vlan=%d -> FLOOD',
+			datapath.id,
+			vlan_id,
+		)
 
 	match = ofp_parser.OFPMatch()
 	actions = [ofp_parser.OFPActionOutput(ofp.OFPP_FLOOD)]

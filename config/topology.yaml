@@ -2,7 +2,7 @@ topology:
   switches:
     s1:
       role: core
-      dpid: null  # populated at runtime from dpid_map.json
+      dpid: null
     s2:
       role: aggregation
       dpid: null
@@ -36,13 +36,20 @@ topology:
 
   aggregation_ports:
     s2:
-      ap1: 2
-      ap2: 3
-      ap3: 4
+      core_port: 1
+      ap_ports:
+        ap1: 2
+        ap2: 3
+        ap3: 4
     s3:
-      ap4: 2
-      ap5: 3
-
+      core_port: 1
+      ap_ports:
+        ap4: 2
+        ap5: 3
+  core_ports:
+    s1:
+      s2: 1
+      s3: 2
   ap_slice_map:
     ap1: vle
     ap2: student_portal

@@ -97,6 +97,8 @@ def create_topology():
 	sta9 = net.addStation('sta9', ip='10.0.5.1/24')
 	sta10 = net.addStation('sta10', ip='10.0.5.2/24')
 
+	h1 = net.addHost('h1', ip='0.0.0.0')
+
 	info('*** Exporting DPID map\n')
 	export_dpid_map([s1, s2, s3, ap1, ap2, ap3, ap4, ap5])
 
@@ -107,6 +109,8 @@ def create_topology():
 	# core to aggregation
 	net.addLink(s1, s2)
 	net.addLink(s1, s3)
+
+	net.addLink(s1, h1)
 
 	# aggregation to access APs
 	net.addLink(s2, ap1)
@@ -129,6 +133,10 @@ def create_topology():
 
 	info('*** Starting network\n')
 	net.start()
+
+	h1.cmd('ip link add link h1-eth0 name h1-eth0.10 type vlan id 10')
+	h1.cmd('ip link set h1-eth0.10 up')
+	h1.cmd('ip addr add 10.0.1.100/24 dev h1-eth0.10')
 
 	info('*** Associating stations\n')
 	sta1.cmd('iw dev sta1-wlan0 connect vle')
