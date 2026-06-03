@@ -5,6 +5,8 @@ description = "Autonomous SDN Network Slicing with Deep Reinforcement Learning -
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "fastapi[standard]>=0.136.3",
+    "httpx2>=2.3.0",
     "os-ken>=4.2.0",
     "pyyaml>=6.0.3",
 ]

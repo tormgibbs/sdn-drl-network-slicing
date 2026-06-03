@@ -34,6 +34,8 @@ class MeterManager:
 		self._datapaths: dict[str, object] = {}
 		self._current_allocations: dict[str, float] = {}
 		self._initialized = False
+		slices = self._load_slices()
+		self.slice_names: frozenset[str] = frozenset(slices['slices'].keys())
 
 	def _load_topology(self) -> dict:
 		with open(self._topology_config) as f:

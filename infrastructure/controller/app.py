@@ -30,6 +30,7 @@ from infrastructure.controller.flow_manager import (
 )
 from infrastructure.controller.meter_manager import MeterManager
 from infrastructure.controller.queue_manager import create_htb_queue
+from infrastructure.controller.rest_api import registry, start_api_server
 from infrastructure.controller.stats_collector import StatsCollector
 
 DPID_MAP_PATH = 'config/dpid_map.json'
@@ -65,6 +66,8 @@ class CampusController(app_manager.OSKenApp):
 		self.meter_manager = MeterManager()
 		self.stats_collector = StatsCollector(interval_sec=5)
 		self.stats_collector.start()
+		registry.register(self.stats_collector, self.meter_manager)
+		start_api_server(host='0.0.0.0', port=8080)
 
 	@set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
 	def switch_features_handler(self, ev):
