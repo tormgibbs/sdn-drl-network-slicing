@@ -14,7 +14,6 @@ from os_ken.controller import ofp_event
 from os_ken.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
 from os_ken.ofproto import ofproto_v1_3
 
-from infrastructure.controller import stats_collector
 from infrastructure.controller.flow_manager import (
 	get_ap_name,
 	get_ap_vlan,
@@ -29,8 +28,9 @@ from infrastructure.controller.flow_manager import (
 	set_ap_vlan_map,
 	set_dpid_map,
 )
-from infrastructure.controller.meter_manager import register_datapath as meter_register
+from infrastructure.controller.meter_manager import MeterManager
 from infrastructure.controller.queue_manager import create_htb_queue
+from infrastructure.controller.stats_collector import StatsCollector
 
 DPID_MAP_PATH = 'config/dpid_map.json'
 SLICES_CONFIG_PATH = 'config/slices.yaml'
@@ -62,7 +62,9 @@ class CampusController(app_manager.OSKenApp):
 		self.logger.info('DPID map loaded: %s', self.dpid_to_name)
 		set_dpid_map(self.dpid_to_name)
 		set_ap_vlan_map(load_ap_vlan_map())
-		stats_collector.start(interval_sec=5)
+		self.meter_manager = MeterManager()
+		self.stats_collector = StatsCollector(interval_sec=5)
+		self.stats_collector.start()
 
 	@set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
 	def switch_features_handler(self, ev):
@@ -79,8 +81,8 @@ class CampusController(app_manager.OSKenApp):
 			install_upf_ingress_rules(datapath)
 		elif is_aggregation(dpid):
 			install_aggregation_rules(datapath)
-			meter_register(name, datapath)
-			stats_collector.register_datapath(name, datapath)
+			self.meter_manager.register_datapath(name, datapath)
+			self.stats_collector.register_datapath(name, datapath)
 		elif is_ap(dpid):
 			ap_name = get_ap_name(dpid)
 			if ap_name is None:
@@ -102,4 +104,4 @@ class CampusController(app_manager.OSKenApp):
 		dpid = datapath.id
 		name = self.dpid_to_name.get(dpid, '')
 		if name in ('s2', 's3'):
-			stats_collector.handle_port_stats_reply(name, ev.msg.body)
+			self.stats_collector.handle_port_stats_reply(name, ev.msg.body)
