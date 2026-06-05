@@ -1,0 +1,94 @@
+info:
+  version: 1.0.2
+  description: NSSF initial local configuration
+
+configuration:
+  nssfName: NSSF
+  sbi:
+    scheme: http
+    registerIPv4: nssf.free5gc.org
+    bindingIPv4: nssf.free5gc.org
+    port: 8000
+    tls:
+      pem: cert/nssf.pem
+      key: cert/nssf.key
+  serviceNameList:
+    - nnssf-nsselection
+    - nnssf-nssaiavailability
+  nrfUri: http://nrf.free5gc.org:8000
+  nrfCertPem: cert/nrf.pem
+  supportedPlmnList:
+    - mcc: 208
+      mnc: 93
+  supportedNssaiInPlmnList:
+    - plmnId:
+        mcc: 208
+        mnc: 93
+      supportedSnssaiList:
+        - sst: 1
+          sd: 000001
+        - sst: 1
+          sd: 000002
+        - sst: 1
+          sd: 000003
+        - sst: 2
+          sd: 000004
+        - sst: 1
+          sd: 000005
+  nsiList:
+    - snssai:
+        sst: 1
+        sd: 000001
+      nsiInformationList:
+        - nrfId: http://nrf.free5gc.org:8000/nnrf-nfm/v1/nf-instances
+          nsiId: 1
+    - snssai:
+        sst: 1
+        sd: 000002
+      nsiInformationList:
+        - nrfId: http://nrf.free5gc.org:8000/nnrf-nfm/v1/nf-instances
+          nsiId: 2
+    - snssai:
+        sst: 1
+        sd: 000003
+      nsiInformationList:
+        - nrfId: http://nrf.free5gc.org:8000/nnrf-nfm/v1/nf-instances
+          nsiId: 3
+    - snssai:
+        sst: 2
+        sd: 000004
+      nsiInformationList:
+        - nrfId: http://nrf.free5gc.org:8000/nnrf-nfm/v1/nf-instances
+          nsiId: 4
+    - snssai:
+        sst: 1
+        sd: 000005
+      nsiInformationList:
+        - nrfId: http://nrf.free5gc.org:8000/nnrf-nfm/v1/nf-instances
+          nsiId: 5
+  amfSetList: []
+  amfList: []
+  taList:
+    - tai:
+        plmnId:
+          mcc: 208
+          mnc: 93
+        tac: 000001
+      accessType: 3GPP_ACCESS
+      supportedSnssaiList:
+        - sst: 1
+          sd: 000001
+        - sst: 1
+          sd: 000002
+        - sst: 1
+          sd: 000003
+        - sst: 2
+          sd: 000004
+        - sst: 1
+          sd: 000005
+  mappingListFromPlmn: []
+
+logger:
+  enable: true
+  level: info
+  reportCaller: false

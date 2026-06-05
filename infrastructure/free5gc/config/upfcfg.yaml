@@ -1,0 +1,31 @@
+version: 1.0.3
+description: UPF initial local configuration
+
+pfcp:
+  addr: upf.free5gc.org
+  nodeID: upf.free5gc.org
+  retransTimeout: 1s
+  maxRetrans: 3
+
+gtpu:
+  forwarder: gtp5g
+  ifList:
+    - addr: upf.free5gc.org
+      type: N3
+
+dnnList:
+  - dnn: internet
+    cidr: 10.60.1.0/24
+  - dnn: internet
+    cidr: 10.60.2.0/24
+  - dnn: internet
+    cidr: 10.60.3.0/24
+  - dnn: internet
+    cidr: 10.60.4.0/24
+  - dnn: internet
+    cidr: 10.60.5.0/24
+
+logger:
+  enable: true
+  level: info
+  reportCaller: false
