@@ -151,7 +151,7 @@ make core-up
 make core-status
 ```
 
-All 16 containers must show as running. If any container shows as Restarting, check its logs:
+All 14 containers must show as running. If any container shows as Restarting, check its logs:
 
 ```bash
 docker logs <container_name> 2>&1 | tail -30
@@ -227,43 +227,40 @@ To set the static IP, toggle the IPv4 Address switch ON inside the DNN configura
 
 ## 10. UERANSIM -- gNB and UE Attach
 
-### 10.1 Start the gNB
+The gNB starts automatically when `make core-up` runs. No manual gNB startup is required.
+
+### 10.1 Verify gNB registered with AMF
 
 ```bash
-docker exec -d ueransim ./nr-gnb -c ./config/gnbcfg.yaml
+docker logs amf 2>&1 | grep -i "ng-setup"
 ```
 
-Verify gNB registered with AMF:
+Expected: a line containing `Send NG-Setup response`.
+
+### 10.2 Attach all UEs
 
 ```bash
-docker logs amf 2>&1 | tail -5
+make ue-attach
+make ue-setup
 ```
 
-Expected: `Send NG-Setup response`
+`make ue-attach` starts all 5 UE processes simultaneously. `make ue-setup` polls until `ue1tun0` appears (up to 30 seconds) then adds routes for all 5 slices.
 
-### 10.2 Attach UE1
+### 10.3 Verify tunnel interfaces
 
 ```bash
-docker exec ueransim ./nr-ue -c ./config/uecfg-ue1.yaml
+docker exec ueransim ip addr show | grep -E "ue[0-9]tun|inet 10.60"
 ```
 
-Expected output (last lines):
+Expected: 5 tunnel interfaces with deterministic names and correct IPs:
 
 ```
-Initial Registration is successful
-PDU Session establishment is successful PSI[1]
-Connection setup for PDU session[1] is successful, TUN interface[uesimtun0, 10.60.1.1] is up.
+ue1tun0  inet 10.60.1.1
+ue2tun0  inet 10.60.2.1
+ue3tun0  inet 10.60.3.1
+ue4tun0  inet 10.60.4.1
+ue5tun0  inet 10.60.5.1
 ```
-
-### 10.3 Verify tunnel interface
-
-In a separate terminal:
-
-```bash
-docker exec ueransim ip addr show uesimtun0
-```
-
-Expected: `inet 10.60.1.1/16 scope global uesimtun0`
 
 ---
 
@@ -272,7 +269,7 @@ Expected: `inet 10.60.1.1/16 scope global uesimtun0`
 ### 11.1 Load required kernel modules
 
 ```bash
-make network-setup
+make module-load
 ```
 
 ### 11.2 Start topology
@@ -283,7 +280,10 @@ In Terminal 1:
 make topology
 ```
 
-Wait for the Mininet-WiFi CLI prompt to appear before proceeding.
+Wait for the Mininet-WiFi CLI prompt to appear before proceeding. The topology script automatically:
+- Associates all stations with their access points
+- Configures per-station routes and ARP entries for UE return path
+- Starts iperf3 servers on all sink stations (sta1, sta3, sta5, sta7, sta9)
 
 ### 11.3 Run network setup
 
@@ -296,11 +296,11 @@ make network-setup
 This script:
 - Waits for OVS bridge s1 to be ready
 - Waits for UPF PFCP listener on port 8805
-- Adds s1-upf to OVS s1 with a fixed port name
+- Adds s1-upf to OVS s1
 - Adds upf-s1 to br-free5gc
 - Creates upf-gw internal port with pinned MAC 02:00:00:00:0c:00
 - Configures host and UPF container routes
-- Configures UPF iptables NAT scoped to the UE pool
+- Configures UPF iptables NAT scoped to the UE pool (10.60.0.0/16)
 
 ### 11.4 Start the controller
 
@@ -310,28 +310,34 @@ In Terminal 2 (after network-setup completes):
 make controller
 ```
 
-The controller connects to all 8 switches and installs flow rules including:
-- VLAN-based forwarding on s1, s2, s3
-- UPF ingress classification rules on s1
+The controller connects to all 8 switches and installs:
+- VLAN-based forwarding rules on s1, s2, s3
+- UPF ingress classification rules on s1 (IP-to-VLAN per slice)
 - Return path rules on s1 (discovered via OpenFlow port description at connection time)
-- HTB queues and OpenFlow meters per slice
-- ap1 MAC rewrite rule for sta1
+- HTB queues per slice on all 5 access points
+- OpenFlow meters on s2 and s3
+- MAC rewrite rules on all 5 access points
 
-### 11.5 Attach UE1
+### 11.5 Attach UEs
 
 ```bash
 make ue-attach && make ue-setup
 ```
 
-ue-setup polls for uesimtun0 with a 30-second timeout and adds the campus route once the interface appears.
-
 ### 11.6 Verify end-to-end
 
 ```bash
-docker exec ueransim ping -I uesimtun0 10.0.1.1 -c 4
+docker exec ueransim ping -I ue1tun0 10.0.1.1 -c 4
 ```
 
-Expected: 4 packets transmitted, 3 or 4 received (first packet may drop due to ARP resolution). A second run should show 0% loss.
+Expected: 3 or 4 received (first packet may drop on ARP resolution). A second run should show 0% loss. Verify all 5 slices:
+
+```bash
+docker exec ueransim ping -I ue2tun0 10.0.2.1 -c 4
+docker exec ueransim ping -I ue3tun0 10.0.3.1 -c 4
+docker exec ueransim ping -I ue4tun0 10.0.4.1 -c 4
+docker exec ueransim ping -I ue5tun0 10.0.5.1 -c 4
+```
 
 ### 11.7 Verify controller installed return path rules
 
@@ -343,11 +349,67 @@ Expected: 5 lines, one per slice.
 
 ### 11.8 Clean up
 
+```bash
 make down
+```
 
 ---
 
-## 12. Known Issues and Workarounds
+## 12. Traffic Generation
+
+iperf3 servers start automatically on sink stations when `make topology` runs. The traffic generator runs on the host and orchestrates iperf3 clients inside the UERANSIM container via `docker exec`.
+
+### 12.1 Run one loop across all slices
+
+```bash
+uv run scripts/traffic_generator.py --loops 1
+```
+
+### 12.2 Run continuously
+
+```bash
+make traffic-start
+```
+
+To stop:
+
+```bash
+make traffic-stop
+```
+
+### 12.3 Run specific slices
+
+```bash
+uv run scripts/traffic_generator.py --slices vle iot --loops 1
+```
+
+### 12.4 Results
+
+JSON results are saved to `logs/traffic/results_<timestamp>.json` after each loop. Each file contains per-slice metrics: throughput (sender and receiver Mbps), loss percentage, retransmits (TCP), jitter and packet counts (UDP).
+
+---
+
+## 13. Startup Sequence After Reboot
+
+```bash
+make core-up
+make module-load
+
+# Terminal 1
+make topology
+
+# Terminal 2 (after topology CLI appears)
+make network-setup
+make controller
+make ue-attach && make ue-setup
+
+# Optional: start traffic generation
+make traffic-start
+```
+
+---
+
+## 14. Known Issues and Workarounds
 
 **gtp5g lost after kernel update**
 The module is installed per kernel version. After any kernel update, rebuild from source (see Section 4.3).
@@ -369,20 +431,3 @@ The `version` attribute in docker-compose.yaml is obsolete in Compose v2. The wa
 
 **OVS does not emit port status events for ports added via ovs-vsctl**
 OFPPR_ADD is unreliable when adding ports to a connected OVS bridge via ovs-vsctl. The controller discovers runtime-added ports via the OpenFlow handshake port description reply instead. Do not rely on EventOFPPortStatus for this purpose.
-
----
-
-## 13. Startup Sequence After Reboot
-
-```bash
-make core-up
-make module-load
-
-# Terminal 1
-make topology
-
-# Terminal 2 (after topology CLI appears)
-make network-setup
-make controller
-make ue-attach && make ue-setup
-```

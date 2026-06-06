@@ -1,4 +1,4 @@
-.PHONY: topology clean-topology core-up core-down core-status controller controller-bg module-load test ue-attach ue-status network-setup ue-setup up logs down
+.PHONY: topology clean-topology core-up core-down core-status controller controller-bg module-load test ue-attach ue-status network-setup ue-setup up logs down traffic-start traffic-stop
 
 topology:
 	sudo python3 infrastructure/topology/campus_topology.py
@@ -76,3 +76,10 @@ down:
 	-docker exec ueransim pkill -f nr-ue 2>/dev/null || true
 	make clean-topology
 	make core-down
+
+
+traffic-start:
+	uv run scripts/traffic_generator.py
+
+traffic-stop:
+	pkill -f traffic_generator.py || true

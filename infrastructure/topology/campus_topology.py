@@ -142,6 +142,7 @@ def create_topology():
 	sta9.cmd('iw dev sta9-wlan0 connect general')
 	sta10.cmd('iw dev sta10-wlan0 connect general')
 
+	info('*** Configuring station routes and ARP entries\n')
 	sta1.cmd('ip route add 10.60.0.0/16 dev sta1-wlan0')
 	sta1.cmd('arp -s 10.60.1.1 02:00:00:00:0c:00')
 	sta3.cmd('ip route add 10.60.0.0/16 dev sta3-wlan0')
@@ -152,6 +153,13 @@ def create_topology():
 	sta7.cmd('arp -s 10.60.4.1 02:00:00:00:0c:00')
 	sta9.cmd('ip route add 10.60.0.0/16 dev sta9-wlan0')
 	sta9.cmd('arp -s 10.60.5.1 02:00:00:00:0c:00')
+
+	info('*** Starting iperf3 servers\n')
+	sta1.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta1.log')
+	sta3.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta3.log')
+	sta5.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta5.log')
+	sta7.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta7.log')
+	sta9.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta9.log')
 
 
 	info('*** Verifying topology\n')

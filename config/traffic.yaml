@@ -1,0 +1,30 @@
+defaults:
+  duration_sec: 60
+
+traffic_profiles:
+  vle:
+    protocol: tcp
+    target_bps: 40_000_000
+    parallel_flows: 10
+    device_count: 3000
+  student_portal:
+    protocol: tcp
+    target_bps: 20_000_000
+    parallel_flows: 8
+    device_count: 2000
+  admin:
+    protocol: tcp
+    target_bps: 8_000_000
+    parallel_flows: 4
+    device_count: 500
+  iot:
+    protocol: udp
+    target_bps: 51_200
+    parallel_flows: 5
+    packet_size: 64
+    device_count: 4000
+  general:
+    protocol: tcp
+    target_bps: 4_000_000
+    parallel_flows: 4
+    device_count: 500
