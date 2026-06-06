@@ -139,7 +139,8 @@ def start_api_server(host: str = '0.0.0.0', port: int = 8080) -> None:
 			port=port,
 			loop='asyncio',
 			log_level='info',
-			access_log=True,
+			log_config=None,
+			access_log=False,
 		)
 
 	t = threading.Thread(target=_run, daemon=True, name='uvicorn-api')

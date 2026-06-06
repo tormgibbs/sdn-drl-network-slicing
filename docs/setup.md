@@ -147,7 +147,6 @@ uv sync
 ### 8.1 Start the core
 
 ```bash
-sudo modprobe gtp5g
 make core-up
 make core-status
 ```
@@ -158,30 +157,37 @@ All 16 containers must show as running. If any container shows as Restarting, ch
 docker logs <container_name> 2>&1 | tail -30
 ```
 
-### 8.2 Verify UPF
+### 8.2 Verify UPF is ready
+
+UPF readiness means the PFCP listener is up and accepting connections, not just that the container started. Check with:
 
 ```bash
-docker logs upf 2>&1 | grep -i "started\|forwarder\|association"
+docker exec upf ss -lnup 2>/dev/null | grep ':8805'
 ```
 
-Expected lines:
+If this returns output, UPF is ready. If it returns nothing, wait a few seconds and retry.
 
-```
-starting Gtpu Forwarder [gtp5g]
-Forwarder started
-UPF started
-handleAssociationSetupRequest
-```
-
-If UPF shows `operation not supported`, gtp5g is not loaded. Run `sudo modprobe gtp5g` then `docker restart upf`.
-
-### 8.3 Verify SMF-UPF association
+If UPF shows `operation not supported` in its logs, gtp5g is not loaded:
 
 ```bash
-docker logs smf 2>&1 | tail -5
+sudo modprobe gtp5g
+docker restart upf
 ```
 
-Expected: `UPF(10.100.200.14) setup association`
+### 8.3 Verify SMF-UPF PFCP association
+
+```bash
+docker logs smf 2>&1 | grep -i "association"
+```
+
+Expected: a line containing `UPF(<ip>) setup association`. The UPF IP is dynamically assigned by Docker and will differ between runs.
+
+If the association line does not appear, SMF may have cached a stale UPF address from a previous failed attempt. Restart SMF after confirming UPF is healthy:
+
+```bash
+docker restart smf
+docker logs smf 2>&1 | grep -i "association"
+```
 
 ---
 
@@ -261,52 +267,83 @@ Expected: `inet 10.60.1.1/16 scope global uesimtun0`
 
 ---
 
-## 11. Mininet-WiFi and Controller
+## 11. Mininet-WiFi, Network Setup, and Controller
 
 ### 11.1 Load required kernel modules
 
 ```bash
-make module-load
+make network-setup
 ```
 
-This loads `gtp5g` and `mac80211_hwsim`.
+### 11.2 Start topology
 
-### 11.2 Start the controller and topology
-
-In terminal 1:
-
-```bash
-make controller
-```
-
-In terminal 2 (after controller shows connected):
+In Terminal 1:
 
 ```bash
 make topology
 ```
 
-### 11.3 Verify switches connected
+Wait for the Mininet-WiFi CLI prompt to appear before proceeding.
 
-Inside the Mininet-WiFi CLI:
+### 11.3 Run network setup
 
-```bash
-sh ovs-vsctl show | grep -E "Bridge|is_connected"
-```
-
-All 8 bridges (s1, s2, s3, ap1-ap5) must show `is_connected: true`.
-
-### 11.4 Verify VLAN isolation
+In Terminal 2 (after topology CLI appears):
 
 ```bash
-sta1 ping -c 3 <sta2-ip>    # intra-slice -- should succeed
-sta1 ping -c 3 <sta3-ip>    # inter-slice -- should fail
+make network-setup
 ```
 
-### 11.5 Clean up topology
+This script:
+- Waits for OVS bridge s1 to be ready
+- Waits for UPF PFCP listener on port 8805
+- Adds s1-upf to OVS s1 with a fixed port name
+- Adds upf-s1 to br-free5gc
+- Creates upf-gw internal port with pinned MAC 02:00:00:00:0c:00
+- Configures host and UPF container routes
+- Configures UPF iptables NAT scoped to the UE pool
+
+### 11.4 Start the controller
+
+In Terminal 2 (after network-setup completes):
 
 ```bash
-make clean-topology
+make controller
 ```
+
+The controller connects to all 8 switches and installs flow rules including:
+- VLAN-based forwarding on s1, s2, s3
+- UPF ingress classification rules on s1
+- Return path rules on s1 (discovered via OpenFlow port description at connection time)
+- HTB queues and OpenFlow meters per slice
+- ap1 MAC rewrite rule for sta1
+
+### 11.5 Attach UE1
+
+```bash
+make ue-attach && make ue-setup
+```
+
+ue-setup polls for uesimtun0 with a 30-second timeout and adds the campus route once the interface appears.
+
+### 11.6 Verify end-to-end
+
+```bash
+docker exec ueransim ping -I uesimtun0 10.0.1.1 -c 4
+```
+
+Expected: 4 packets transmitted, 3 or 4 received (first packet may drop due to ARP resolution). A second run should show 0% loss.
+
+### 11.7 Verify controller installed return path rules
+
+```bash
+strings logs/controller.log | grep "Return path rule installed"
+```
+
+Expected: 5 lines, one per slice.
+
+### 11.8 Clean up
+
+make down
 
 ---
 
@@ -330,20 +367,22 @@ Caused by staticPools CIDR matching the full dynamic pool CIDR. Fixed by setting
 **docker compose version warning**
 The `version` attribute in docker-compose.yaml is obsolete in Compose v2. The warning is harmless and can be ignored.
 
+**OVS does not emit port status events for ports added via ovs-vsctl**
+OFPPR_ADD is unreliable when adding ports to a connected OVS bridge via ovs-vsctl. The controller discovers runtime-added ports via the OpenFlow handshake port description reply instead. Do not rely on EventOFPPortStatus for this purpose.
+
 ---
 
 ## 13. Startup Sequence After Reboot
 
 ```bash
-sudo modprobe gtp5g
-sudo modprobe mac80211_hwsim
 make core-up
-make core-status
-# terminal 1
-make controller
-# terminal 2
+make module-load
+
+# Terminal 1
 make topology
-# terminal 3 (optional -- attach UE1 for verification)
-docker exec -d ueransim ./nr-gnb -c ./config/gnbcfg.yaml
-docker exec ueransim ./nr-ue -c ./config/uecfg-ue1.yaml
+
+# Terminal 2 (after topology CLI appears)
+make network-setup
+make controller
+make ue-attach && make ue-setup
 ```

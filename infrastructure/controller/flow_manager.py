@@ -24,6 +24,7 @@ AP_UPLINK_PORT = 2
 _ap_vlan_map: dict[str, int] = {}
 _dpid_role: dict[int, str] = {}
 _subnet_vlan_map: dict[str, int] = {}
+_upf_config: dict = {}
 
 _SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
 _TOPOLOGY_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'topology.yaml'
@@ -39,6 +40,12 @@ def _load_subnet_vlan_map() -> dict[str, int]:
 		if subnet and vlan:
 			result[subnet] = vlan
 	return result
+
+
+def _load_upf_config() -> dict:
+	with open(_TOPOLOGY_CONFIG) as f:
+		config = yaml.safe_load(f)
+	return config.get('upf', {})
 
 
 def _load_topology() -> dict:
@@ -63,8 +70,11 @@ def set_ap_vlan_map(ap_vlan_map: dict[str, int]) -> None:
 	_ap_vlan_map.update(ap_vlan_map)
 	_subnet_vlan_map.clear()
 	_subnet_vlan_map.update(_load_subnet_vlan_map())
+	_upf_config.clear()
+	_upf_config.update(_load_upf_config())
 	logger.info('AP VLAN map registered: %s', _ap_vlan_map)
 	logger.info('Subnet VLAN map loaded: %s', _subnet_vlan_map)
+	logger.info('UPF config loaded: %s', _upf_config)
 
 
 def is_core(dpid: int) -> bool:
@@ -94,6 +104,7 @@ def reset_state() -> None:
 	_dpid_role.clear()
 	_ap_vlan_map.clear()
 	_subnet_vlan_map.clear()
+	_upf_config.clear()
 
 
 def install_ap_rules(datapath: object, ap_name: str, vlan_id: int) -> None:
@@ -120,6 +131,19 @@ def install_ap_rules(datapath: object, ap_name: str, vlan_id: int) -> None:
 	]
 	_add_flow(datapath, priority=10, match=match_tagged, actions=actions_strip)
 
+	if ap_name == 'ap1':
+		match_rewrite = ofp_parser.OFPMatch(
+			in_port=AP_UPLINK_PORT,
+			eth_type=0x0800,
+			vlan_vid=(vlan_id | ofproto.OFPVID_PRESENT),
+		)
+		actions_rewrite = [
+			ofp_parser.OFPActionPopVlan(),
+			ofp_parser.OFPActionSetField(eth_dst='02:00:00:00:02:00'),
+			ofp_parser.OFPActionOutput(AP_WLAN_PORT),
+		]
+		_add_flow(datapath, priority=20, match=match_rewrite, actions=actions_rewrite)
+
 	logger.info(
 		'AP rules installed: dpid=%s ap=%s vlan=%s', datapath.id, ap_name, vlan_id
 	)
@@ -137,14 +161,6 @@ def install_aggregation_rules(datapath: object) -> None:
 
 
 def install_core_rules(datapath: object) -> None:
-	"""
-	Install VLAN-aware forwarding rules on s1.
-
-	Tagged frames are flooded to reach both aggregation switches and directly
-	connected hosts (h1). Tags are preserved end-to-end so downstream meter
-	flows on s2/s3 can match on vlan_vid.
-	"""
-
 	ofp = datapath.ofproto
 	ofp_parser = datapath.ofproto_parser
 
@@ -184,18 +200,40 @@ def install_core_rules(datapath: object) -> None:
 
 def install_upf_ingress_rules(datapath: object) -> None:
 	"""
-	Install IP-to-VLAN classification rules on s1 for traffic arriving from UPF.
-	Matches on source IP subnet per slice, pushes the correct VLAN tag, floods
-	to aggregation switches. Called once at controller startup for s1 only.
+	Install IP-to-VLAN classification rules on s1 for UPF-originated traffic.
+	Matches source IP subnet per slice, pushes the correct VLAN tag, and forwards
+	out the s1 port toward the aggregation switch responsible for that slice.
 	"""
 	if not _subnet_vlan_map:
 		logger.warning('Subnet VLAN map is empty -- skipping UPF ingress rules')
 		return
 
-	ofp = datapath.ofproto
+	topology = _load_topology()
+	with open(_SLICES_CONFIG) as f:
+		slices_config = yaml.safe_load(f)['slices']
+
+	core_ports = topology['topology']['core_ports']['s1']
+	aggregation_map = topology['topology']['aggregation_map']
+	ap_slice_map = topology['topology']['ap_slice_map']
+
+	vlan_to_port: dict[int, int] = {}
+	for agg_switch, aps in aggregation_map.items():
+		out_port = core_ports[agg_switch]
+		for ap in aps:
+			slice_name = ap_slice_map.get(ap)
+			if slice_name and slice_name in slices_config:
+				vlan_to_port[slices_config[slice_name]['vlan']] = out_port
+
 	ofp_parser = datapath.ofproto_parser
 
 	for subnet, vlan_id in _subnet_vlan_map.items():
+		out_port = vlan_to_port.get(vlan_id)
+		if out_port is None:
+			logger.warning(
+				'No output port found for vlan=%s subnet=%s -- skipping', vlan_id, subnet
+			)
+			continue
+
 		ip_address, prefix_len = subnet.split('/')
 		match = ofp_parser.OFPMatch(
 			eth_type=0x0800,
@@ -204,14 +242,57 @@ def install_upf_ingress_rules(datapath: object) -> None:
 		actions = [
 			ofp_parser.OFPActionPushVlan(0x8100),
 			ofp_parser.OFPActionSetField(vlan_vid=(vlan_id | ofproto.OFPVID_PRESENT)),
-			ofp_parser.OFPActionOutput(ofp.OFPP_FLOOD),
+			ofp_parser.OFPActionOutput(out_port),
 		]
 		_add_flow(datapath, priority=20, match=match, actions=actions)
 		logger.info(
-			'UPF ingress rule installed: dpid=%s subnet=%s vlan=%s',
+			'UPF ingress rule installed: dpid=%s subnet=%s vlan=%s out_port=%s',
 			datapath.id,
 			subnet,
 			vlan_id,
+			out_port,
+		)
+
+
+def install_return_path_rules(datapath: object, s1_upf_port: int) -> None:
+	"""
+	Install return path rules on s1 for campus-to-UE traffic.
+	Matches VLAN-tagged frames destined for UE subnets, strips the VLAN tag,
+	rewrites eth_dst to UPF eth0 MAC, and forwards out s1-upf port.
+	Called after port discovery on the core switch completes.
+	"""
+	if not _subnet_vlan_map:
+		logger.warning('Subnet VLAN map empty -- skipping return path rules')
+		return
+
+	upf_mac = _upf_config.get('eth0_mac')
+	if not upf_mac:
+		logger.error(
+			'UPF eth0_mac not in topology config -- cannot install return path rules'
+		)
+		return
+
+	ofp_parser = datapath.ofproto_parser
+
+	for subnet, vlan_id in _subnet_vlan_map.items():
+		ip_address, prefix_len = subnet.split('/')
+		match = ofp_parser.OFPMatch(
+			vlan_vid=(vlan_id | ofproto.OFPVID_PRESENT),
+			eth_type=0x0800,
+			ipv4_dst=(ip_address, _prefix_to_mask(int(prefix_len))),
+		)
+		actions = [
+			ofp_parser.OFPActionPopVlan(),
+			ofp_parser.OFPActionSetField(eth_dst=upf_mac),
+			ofp_parser.OFPActionOutput(s1_upf_port),
+		]
+		_add_flow(datapath, priority=25, match=match, actions=actions)
+		logger.info(
+			'Return path rule installed: dpid=%s vlan=%s subnet=%s -> port=%s',
+			datapath.id,
+			vlan_id,
+			subnet,
+			s1_upf_port,
 		)
 
 

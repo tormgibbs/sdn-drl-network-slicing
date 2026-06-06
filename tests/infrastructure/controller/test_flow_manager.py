@@ -107,15 +107,20 @@ class TestFlowInstallation:
 		dp.ofproto.OFPP_FLOOD = 0xFFFFFFFB
 		return dp
 
-	def test_install_ap_rules_sends_two_flows(self, loaded_maps):
-		dp = self._make_datapath()
-		fm.install_ap_rules(dp, 'ap1', 10)
-		assert dp.send_msg.call_count == 2
-
 	def test_install_aggregation_rules_sends_one_flow(self, loaded_maps):
 		dp = self._make_datapath(dpid=2)
 		fm.install_aggregation_rules(dp)
 		assert dp.send_msg.call_count == 1
+
+	def test_install_ap_rules_non_ap1_sends_two_flows(self, loaded_maps):
+		dp = self._make_datapath(dpid=1152921504606846978)
+		fm.install_ap_rules(dp, 'ap2', 20)
+		assert dp.send_msg.call_count == 2
+
+	def test_install_ap_rules_ap1_sends_three_flows(self, loaded_maps):
+		dp = self._make_datapath()
+		fm.install_ap_rules(dp, 'ap1', 10)
+		assert dp.send_msg.call_count == 3
 
 	def test_install_core_rules_sends_correct_flows(self, loaded_maps):
 		dp = self._make_datapath(dpid=1)

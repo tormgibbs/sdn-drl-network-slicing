@@ -1,10 +1,12 @@
-.PHONY: topology clean-topology core-up core-down core-status controller module-load test
+.PHONY: topology clean-topology core-up core-down core-status controller controller-bg module-load test ue-attach ue-status network-setup ue-setup up logs down
 
 topology:
 	sudo python3 infrastructure/topology/campus_topology.py
 
 clean-topology:
 	sudo mn -c
+	sudo ovs-vsctl --if-exists del-port s1 s1-upf
+	sudo ovs-vsctl --if-exists del-port s1 upf-gw
 	sudo ovs-vsctl --all destroy QoS
 	sudo ovs-vsctl --all destroy Queue
 
@@ -18,6 +20,7 @@ core-status:
 	cd infrastructure/free5gc && docker compose ps
 
 controller:
+	mkdir -p logs
 	sudo $(shell which uv) run infrastructure/controller/run.py
 
 module-load:
@@ -25,5 +28,43 @@ module-load:
 	sudo modprobe mac80211_hwsim
 	lsmod | grep -E "gtp5g|mac80211_hwsim"
 
+ue-attach:
+	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue1.yaml
+
+ue-status:
+	docker exec ueransim ps aux | grep nr-ue
+
 test:
 	uv run pytest tests/ -v
+
+network-setup:
+	sudo bash scripts/network-setup.sh
+
+ue-setup:
+	@echo "Waiting for uesimtun0..."
+	@i=0; until docker exec ueransim ip link show uesimtun0 >/dev/null 2>&1; do \
+		i=$$((i+1)); [ $$i -ge 30 ] && echo "ERROR: uesimtun0 did not appear after 30s" && exit 1; \
+		sleep 1; \
+	done
+	docker exec ueransim ip route add 10.0.0.0/8 dev uesimtun0 2>/dev/null || true
+
+logs:
+	mkdir -p logs
+
+controller-bg: logs
+	sudo $(shell which uv) run infrastructure/controller/run.py > logs/controller.log 2>&1 &
+	@echo "Controller started. Monitoring: tail -f logs/controller.log"
+
+up: core-up module-load
+	@echo ""
+	@echo "Run the following in order:"
+	@echo "  1. make topology          (Terminal 1 - stays open)"
+	@echo "  2. make network-setup     (Terminal 2 - after topology CLI appears)"
+	@echo "  3. make controller        (Terminal 2 - after network-setup completes)"
+	@echo "  4. make ue-attach         (Terminal 2)"
+	@echo "  5. make ue-setup          (Terminal 2)"
+
+down:
+	-docker exec ueransim pkill -f nr-ue 2>/dev/null || true
+	make clean-topology
+	make core-down

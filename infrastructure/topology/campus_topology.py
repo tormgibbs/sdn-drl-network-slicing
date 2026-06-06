@@ -97,8 +97,6 @@ def create_topology():
 	sta9 = net.addStation('sta9', ip='10.0.5.1/24')
 	sta10 = net.addStation('sta10', ip='10.0.5.2/24')
 
-	h1 = net.addHost('h1', ip='0.0.0.0')
-
 	info('*** Exporting DPID map\n')
 	export_dpid_map([s1, s2, s3, ap1, ap2, ap3, ap4, ap5])
 
@@ -109,8 +107,6 @@ def create_topology():
 	# core to aggregation
 	net.addLink(s1, s2)
 	net.addLink(s1, s3)
-
-	net.addLink(s1, h1)
 
 	# aggregation to access APs
 	net.addLink(s2, ap1)
@@ -134,10 +130,6 @@ def create_topology():
 	info('*** Starting network\n')
 	net.start()
 
-	h1.cmd('ip link add link h1-eth0 name h1-eth0.10 type vlan id 10')
-	h1.cmd('ip link set h1-eth0.10 up')
-	h1.cmd('ip addr add 10.0.1.100/24 dev h1-eth0.10')
-
 	info('*** Associating stations\n')
 	sta1.cmd('iw dev sta1-wlan0 connect vle')
 	sta2.cmd('iw dev sta2-wlan0 connect vle')
@@ -149,6 +141,9 @@ def create_topology():
 	sta8.cmd('iw dev sta8-wlan0 connect iot')
 	sta9.cmd('iw dev sta9-wlan0 connect general')
 	sta10.cmd('iw dev sta10-wlan0 connect general')
+
+	sta1.cmd('ip route add 10.60.0.0/16 dev sta1-wlan0')
+	sta1.cmd('arp -s 10.60.1.1 02:00:00:00:0c:00')
 
 	info('*** Verifying topology\n')
 	for node in [s1, s2, s3, ap1, ap2, ap3, ap4, ap5]:

@@ -20,6 +20,7 @@ from infrastructure.controller.flow_manager import (
 	install_aggregation_rules,
 	install_ap_rules,
 	install_core_rules,
+	install_return_path_rules,
 	install_table_miss,
 	install_upf_ingress_rules,
 	is_aggregation,
@@ -108,3 +109,40 @@ class CampusController(app_manager.OSKenApp):
 		name = self.dpid_to_name.get(dpid, '')
 		if name in ('s2', 's3'):
 			self.stats_collector.handle_port_stats_reply(name, ev.msg.body)
+
+	@set_ev_cls(
+			ofp_event.EventOFPPortDescStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
+		)
+	def port_desc_reply_handler(self, ev):
+		datapath = ev.msg.datapath
+		if not is_core(datapath.id):
+			return
+		for port in ev.msg.body:
+			if port.name.decode('utf-8') == 's1-upf':
+				self.logger.info('Discovered s1-upf port: %s', port.port_no)
+				install_return_path_rules(datapath, port.port_no)
+				return
+		self.logger.error(
+			'Port s1-upf not found on core switch -- return path rules not installed'
+		)
+
+	@set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
+	def port_status_handler(self, ev):
+		msg = ev.msg
+		datapath = msg.datapath
+		if not is_core(datapath.id):
+			return
+		desc = msg.desc
+		port_name = desc.name.decode('utf-8')
+		self.logger.info(
+			'Port status event: name=%s port_no=%s reason=%s',
+			port_name,
+			desc.port_no,
+			msg.reason,
+		)
+		if port_name == 's1-upf' and msg.reason in (
+			datapath.ofproto.OFPPR_ADD,
+			datapath.ofproto.OFPPR_MODIFY,
+		):
+			self.logger.info('s1-upf port added: port_no=%s', desc.port_no)
+			install_return_path_rules(datapath, desc.port_no)
