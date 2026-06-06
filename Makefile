@@ -30,6 +30,10 @@ module-load:
 
 ue-attach:
 	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue1.yaml
+	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue2.yaml
+	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue3.yaml
+	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue4.yaml
+	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue5.yaml
 
 ue-status:
 	docker exec ueransim ps aux | grep nr-ue
@@ -41,12 +45,16 @@ network-setup:
 	sudo bash scripts/network-setup.sh
 
 ue-setup:
-	@echo "Waiting for uesimtun0..."
-	@i=0; until docker exec ueransim ip link show uesimtun0 >/dev/null 2>&1; do \
-		i=$$((i+1)); [ $$i -ge 30 ] && echo "ERROR: uesimtun0 did not appear after 30s" && exit 1; \
+	@echo "Waiting for ue1tun0..."
+	@i=0; until docker exec ueransim ip link show ue1tun0 >/dev/null 2>&1; do \
+		i=$$((i+1)); [ $$i -ge 30 ] && echo "ERROR: ue1tun0 did not appear after 30s" && exit 1; \
 		sleep 1; \
 	done
-	docker exec ueransim ip route add 10.0.0.0/8 dev uesimtun0 2>/dev/null || true
+	docker exec ueransim ip route add 10.0.0.0/8 dev ue1tun0 2>/dev/null || true
+	docker exec ueransim ip route add 10.0.2.0/24 dev ue2tun0 2>/dev/null || true
+	docker exec ueransim ip route add 10.0.3.0/24 dev ue3tun0 2>/dev/null || true
+	docker exec ueransim ip route add 10.0.4.0/24 dev ue4tun0 2>/dev/null || true
+	docker exec ueransim ip route add 10.0.5.0/24 dev ue5tun0 2>/dev/null || true
 
 logs:
 	mkdir -p logs

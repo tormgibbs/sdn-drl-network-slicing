@@ -54,7 +54,7 @@ Use dump-ports-desc to get the full port list including runtime-added ports like
 
 **Root cause:** The return path flow rule on s1 was stripping the VLAN tag and forwarding to s1-upf, but the dst MAC was set to upf-gw's MAC (02:00:00:00:0c:00) instead of UPF eth0's MAC. UPF eth0 dropped the frame at L2 before it reached the IP stack.
 
-**Resolution:** The flow rule action must include `set_field:UPF_ETH0_MAC->eth_dst` before `output:s1-upf`. UPF eth0 MAC is now pinned to 02:00:00:00:0a:00 in docker-compose.yaml via `mac_address` field and stored in topology.yaml under the `upf` block.
+**Resolution:** The flow rule action must include `set_field:UPF_ETH0_MAC->eth_dst` before `output:s1-upf`. UPF eth0 MAC is now pinned to 02:00:00:00:00:ff in docker-compose.yaml via `mac_address` field and stored in topology.yaml under the `upf` block.
 
 **Key diagnostic:** `sudo tcpdump -i upf-s1 -n -e icmp` -- look at the dst MAC on reply packets. It must match UPF eth0's MAC, not upf-gw's.
 

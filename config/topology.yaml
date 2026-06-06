@@ -76,7 +76,7 @@ controller:
   stats_interval_sec: 5
 
 upf:
-  eth0_mac: "02:00:00:00:0a:00"
+  eth0_mac: "02:00:00:00:00:ff"
   gw_mac: "02:00:00:00:0c:00"
   gw_ip: "10.100.200.200"
   s1_upf_port_name: "s1-upf"

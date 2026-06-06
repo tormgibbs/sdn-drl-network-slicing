@@ -18,6 +18,14 @@ s3: port 1 -> s1, port 2 -> ap4, port 3 -> ap5
 ap*: port 1 -> wireless clients, port 2 -> switch
 """
 
+_AP_SINK_MAC: dict[str, str] = {
+	'ap1': '02:00:00:00:02:00',
+	'ap2': '02:00:00:00:04:00',
+	'ap3': '02:00:00:00:06:00',
+	'ap4': '02:00:00:00:08:00',
+	'ap5': '02:00:00:00:0a:00',
+}
+
 AP_WLAN_PORT = 1
 AP_UPLINK_PORT = 2
 
@@ -131,7 +139,8 @@ def install_ap_rules(datapath: object, ap_name: str, vlan_id: int) -> None:
 	]
 	_add_flow(datapath, priority=10, match=match_tagged, actions=actions_strip)
 
-	if ap_name == 'ap1':
+	sink_mac = _AP_SINK_MAC.get(ap_name)
+	if sink_mac:
 		match_rewrite = ofp_parser.OFPMatch(
 			in_port=AP_UPLINK_PORT,
 			eth_type=0x0800,
@@ -139,7 +148,7 @@ def install_ap_rules(datapath: object, ap_name: str, vlan_id: int) -> None:
 		)
 		actions_rewrite = [
 			ofp_parser.OFPActionPopVlan(),
-			ofp_parser.OFPActionSetField(eth_dst='02:00:00:00:02:00'),
+			ofp_parser.OFPActionSetField(eth_dst=sink_mac),
 			ofp_parser.OFPActionOutput(AP_WLAN_PORT),
 		]
 		_add_flow(datapath, priority=20, match=match_rewrite, actions=actions_rewrite)

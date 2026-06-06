@@ -112,10 +112,10 @@ class TestFlowInstallation:
 		fm.install_aggregation_rules(dp)
 		assert dp.send_msg.call_count == 1
 
-	def test_install_ap_rules_non_ap1_sends_two_flows(self, loaded_maps):
+	def test_install_ap_rules_non_ap1_sends_three_flows(self, loaded_maps):
 		dp = self._make_datapath(dpid=1152921504606846978)
 		fm.install_ap_rules(dp, 'ap2', 20)
-		assert dp.send_msg.call_count == 2
+		assert dp.send_msg.call_count == 3
 
 	def test_install_ap_rules_ap1_sends_three_flows(self, loaded_maps):
 		dp = self._make_datapath()
@@ -131,3 +131,57 @@ class TestFlowInstallation:
 		dp = self._make_datapath()
 		fm.install_table_miss(dp)
 		assert dp.send_msg.call_count == 1
+
+
+class TestMacCollision:
+	def test_sink_macs_do_not_collide_with_upf_eth0(self, loaded_maps):
+		upf_mac = fm._upf_config.get('eth0_mac')
+		assert upf_mac not in fm._AP_SINK_MAC.values(), (
+			f'UPF eth0 MAC {upf_mac} collides with an AP sink MAC'
+		)
+
+	def test_sink_macs_do_not_collide_with_upf_gw(self, loaded_maps):
+		gw_mac = fm._upf_config.get('gw_mac')
+		assert gw_mac not in fm._AP_SINK_MAC.values(), (
+			f'upf-gw MAC {gw_mac} collides with an AP sink MAC'
+		)
+
+	def test_all_aps_have_sink_mac(self):
+		for ap in ('ap1', 'ap2', 'ap3', 'ap4', 'ap5'):
+			assert ap in fm._AP_SINK_MAC, f'{ap} missing from _AP_SINK_MAC'
+
+	def test_sink_macs_are_unique(self):
+		macs = list(fm._AP_SINK_MAC.values())
+		assert len(macs) == len(set(macs)), 'Duplicate MACs in _AP_SINK_MAC'
+
+
+class TestReturnPathRules:
+	def _make_datapath(self, dpid=1):
+		dp = MagicMock()
+		dp.id = dpid
+		dp.ofproto.OFPVID_PRESENT = 0x1000
+		dp.ofproto.OFPIT_APPLY_ACTIONS = 4
+		dp.ofproto.OFPP_FLOOD = 0xFFFFFFFB
+		return dp
+
+	def test_install_return_path_rules_sends_one_flow_per_slice(self, loaded_maps):
+		dp = self._make_datapath()
+		fm.install_return_path_rules(dp, s1_upf_port=3)
+		assert dp.send_msg.call_count == 5
+
+	def test_install_return_path_rules_skips_when_no_subnet_map(self, reset_state):
+		dp = self._make_datapath()
+		fm.install_return_path_rules(dp, s1_upf_port=3)
+		assert dp.send_msg.call_count == 0
+
+	def test_install_return_path_rules_skips_when_no_upf_mac(self, loaded_maps, caplog):
+		import logging
+
+		fm._upf_config.clear()
+		dp = self._make_datapath()
+		with caplog.at_level(
+			logging.ERROR, logger='infrastructure.controller.flow_manager'
+		):
+			fm.install_return_path_rules(dp, s1_upf_port=3)
+		assert dp.send_msg.call_count == 0
+		assert 'eth0_mac not in topology config' in caplog.text

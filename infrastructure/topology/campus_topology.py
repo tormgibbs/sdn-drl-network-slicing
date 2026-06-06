@@ -78,24 +78,24 @@ def create_topology():
 
 	info('*** Adding stations (source + sink per slice)\n')
 	# VLE slice stations
-	sta1 = net.addStation('sta1', ip='10.0.1.1/24')
-	sta2 = net.addStation('sta2', ip='10.0.1.2/24')
+	sta1 = net.addStation('sta1', ip='10.0.1.1/24', mac='02:00:00:00:02:00')
+	sta2 = net.addStation('sta2', ip='10.0.1.2/24', mac='02:00:00:00:03:00')
 
 	# Student Portal slice stations
-	sta3 = net.addStation('sta3', ip='10.0.2.1/24')
-	sta4 = net.addStation('sta4', ip='10.0.2.2/24')
+	sta3 = net.addStation('sta3', ip='10.0.2.1/24', mac='02:00:00:00:04:00')
+	sta4 = net.addStation('sta4', ip='10.0.2.2/24', mac='02:00:00:00:05:00')
 
 	# Admin slice stations
-	sta5 = net.addStation('sta5', ip='10.0.3.1/24')
-	sta6 = net.addStation('sta6', ip='10.0.3.2/24')
+	sta5 = net.addStation('sta5', ip='10.0.3.1/24', mac='02:00:00:00:06:00')
+	sta6 = net.addStation('sta6', ip='10.0.3.2/24', mac='02:00:00:00:07:00')
 
 	# IoT slice stations
-	sta7 = net.addStation('sta7', ip='10.0.4.1/24')
-	sta8 = net.addStation('sta8', ip='10.0.4.2/24')
+	sta7 = net.addStation('sta7', ip='10.0.4.1/24', mac='02:00:00:00:08:00')
+	sta8 = net.addStation('sta8', ip='10.0.4.2/24', mac='02:00:00:00:09:00')
 
 	# General Traffic slice stations
-	sta9 = net.addStation('sta9', ip='10.0.5.1/24')
-	sta10 = net.addStation('sta10', ip='10.0.5.2/24')
+	sta9 = net.addStation('sta9', ip='10.0.5.1/24', mac='02:00:00:00:0a:00')
+	sta10 = net.addStation('sta10', ip='10.0.5.2/24', mac='02:00:00:00:0b:00')
 
 	info('*** Exporting DPID map\n')
 	export_dpid_map([s1, s2, s3, ap1, ap2, ap3, ap4, ap5])
@@ -144,6 +144,15 @@ def create_topology():
 
 	sta1.cmd('ip route add 10.60.0.0/16 dev sta1-wlan0')
 	sta1.cmd('arp -s 10.60.1.1 02:00:00:00:0c:00')
+	sta3.cmd('ip route add 10.60.0.0/16 dev sta3-wlan0')
+	sta3.cmd('arp -s 10.60.2.1 02:00:00:00:0c:00')
+	sta5.cmd('ip route add 10.60.0.0/16 dev sta5-wlan0')
+	sta5.cmd('arp -s 10.60.3.1 02:00:00:00:0c:00')
+	sta7.cmd('ip route add 10.60.0.0/16 dev sta7-wlan0')
+	sta7.cmd('arp -s 10.60.4.1 02:00:00:00:0c:00')
+	sta9.cmd('ip route add 10.60.0.0/16 dev sta9-wlan0')
+	sta9.cmd('arp -s 10.60.5.1 02:00:00:00:0c:00')
+
 
 	info('*** Verifying topology\n')
 	for node in [s1, s2, s3, ap1, ap2, ap3, ap4, ap5]:

@@ -51,3 +51,5 @@ ciphering:
 integrityMaxRate:
   uplink: "full"
   downlink: "full"
+
+tunName: ue4tun
