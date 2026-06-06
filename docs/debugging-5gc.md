@@ -154,6 +154,24 @@ sudo ovs-vsctl --may-exist add-port s1 upf-gw \
 ```
 Note the escaped quotes -- OVS requires this syntax for the mac field in bash.
 
+FROM free5gc/ueransim:latest
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends iperf3 && \
+    rm -rf /var/lib/apt/lists/*### Non-deterministic tunnel interface assignment for multiple UEs
+
+**Symptom:** With multiple UEs attached, `uesimtun0` does not reliably correspond to UE1. Interface-to-UE mapping shifts between runs, causing routes added to `uesimtun0` to target the wrong UE.
+
+**Root cause:** UERANSIM assigns tunnel interface indices in PDU session establishment order, which is non-deterministic when multiple `nr-ue` processes attach concurrently.
+
+**Resolution:** Set `tunName` per UE config file. UERANSIM uses this as a prefix:
+
+```yaml
+# uecfg-ue1.yaml
+tunName: ue1tun
+```
+
+This produces `ue1tun0`, `ue2tun0`, etc. — deterministic regardless of attach order. All five UE configs now have explicit `tunName` values. `make ue-setup` uses these hardcoded names for route configuration.
+
 ---
 
 ## Runtime State That Must Be Recreated After Every Restart
