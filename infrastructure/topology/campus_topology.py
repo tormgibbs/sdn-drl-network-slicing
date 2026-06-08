@@ -155,8 +155,10 @@ def create_topology():
 	sta9.cmd('arp -s 10.60.5.1 02:00:00:00:0c:00')
 
 	info('*** Starting iperf3 servers\n')
-	sta1.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta1.log')
-	sta3.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta3.log')
+	sta1.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta1-5201.log')
+	sta1.cmd('iperf3 -s -p 5202 -D --logfile /tmp/iperf3-sta1-5202.log')
+	sta3.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta3-5201.log')
+	sta3.cmd('iperf3 -s -p 5202 -D --logfile /tmp/iperf3-sta3-5202.log')
 	sta5.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta5.log')
 	sta7.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta7.log')
 	sta9.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta9.log')

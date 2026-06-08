@@ -124,7 +124,7 @@ sudo make install
 sudo modprobe gtp5g
 ```
 
-The module is registered in `/etc/modules-load.d/gtp5g.conf` for auto-load on boot, but only for the current kernel version. A kernel update amy require a rebuild.
+The module is registered in `/etc/modules-load.d/gtp5g.conf` for auto-load on boot, but only for the current kernel version. A kernel update may require a rebuild.
 
 ---
 
@@ -193,35 +193,9 @@ docker logs smf 2>&1 | grep -i "association"
 
 ## 9. Subscriber Registration
 
-Go to http://localhost:5000 and log in with `admin` / `free5gc`.
+See [docs/subscriber-registration.md](subscriber-registration.md).
 
-Navigate to Subscribers and create five subscribers. For each subscriber, fill in the fields as follows. Only SUPI, SST, SD, and Static IP change per subscriber. All other fields are identical.
-
-Common fields for all subscribers:
-
-- Authentication Management Field (AMF): `8000`
-- Authentication Method: `5G_AKA`
-- Operator Code Type: `OPc`
-- Operator Code Value: `8e27b6af0e692e750f32667a3b14605d`
-- Permanent Authentication Key: `8baf473f2f8fd09487cccbd7097c6862`
-- Subscribed UE AMBR Uplink: `1 Gbps`
-- Subscribed UE AMBR Downlink: `2 Gbps`
-- DNN: `internet`
-- Default 5QI: `9`
-- Delete all pre-filled Flow Rules
-- Delete all pre-filled S-NSSAI entries, then add one new S-NSSAI per subscriber
-
-Per-subscriber values:
-
-| Subscriber | SUPI                     | SST | SD     | Static IP  |
-|------------|--------------------------|-----|--------|------------|
-| UE1 (VLE)  | imsi-208930000000001     | 1   | 000001 | 10.60.1.1  |
-| UE2 (Portal) | imsi-208930000000002   | 1   | 000002 | 10.60.2.1  |
-| UE3 (Admin) | imsi-208930000000003    | 1   | 000003 | 10.60.3.1  |
-| UE4 (IoT)  | imsi-208930000000004     | 2   | 000004 | 10.60.4.1  |
-| UE5 (General) | imsi-208930000000005  | 1   | 000005 | 10.60.5.1  |
-
-To set the static IP, toggle the IPv4 Address switch ON inside the DNN configuration section and enter the IP. Click VERIFY to confirm the IP is within the configured static pool. It will only verify correctly after the SST and SD fields are set for that slice.
+This is a one-time setup step. Subscriber data persists in MongoDB across restarts and does not need to be repeated unless the database volume is wiped.
 
 ---
 
@@ -294,6 +268,7 @@ make network-setup
 ```
 
 This script:
+- Creates the s1-upf/upf-s1 veth pair
 - Waits for OVS bridge s1 to be ready
 - Waits for UPF PFCP listener on port 8805
 - Adds s1-upf to OVS s1
@@ -357,35 +332,20 @@ make down
 
 ## 12. Traffic Generation
 
-iperf3 servers start automatically on sink stations when `make topology` runs. The traffic generator runs on the host and orchestrates iperf3 clients inside the UERANSIM container via `docker exec`.
+See [docs/traffic-config.md](traffic-config.md) for full configuration reference and rate design rationale.
 
-### 12.1 Run one loop across all slices
+iperf3 servers start automatically on sink stations when `make topology` runs.
 
 ```bash
+# Run one loop across all slices
 uv run scripts/traffic_generator.py --loops 1
-```
 
-### 12.2 Run continuously
-
-```bash
+# Run continuously
 make traffic-start
-```
 
-To stop:
-
-```bash
+# Stop
 make traffic-stop
 ```
-
-### 12.3 Run specific slices
-
-```bash
-uv run scripts/traffic_generator.py --slices vle iot --loops 1
-```
-
-### 12.4 Results
-
-JSON results are saved to `logs/traffic/results_<timestamp>.json` after each loop. Each file contains per-slice metrics: throughput (sender and receiver Mbps), loss percentage, retransmits (TCP), jitter and packet counts (UDP).
 
 ---
 
@@ -411,38 +371,6 @@ make traffic-start
 
 ## 14. Known Issues and Workarounds
 
-**gtp5g lost after kernel update**
-The module is installed per kernel version. After any kernel update, rebuild from source (see Section 4.3).
+See [docs/known-issues.md](known-issues.md).
 
-**Station auto-association not working**
-Mininet-WiFi does not automatically trigger wpa_supplicant per station. Use manual `iw connect` as shown in Section 9.4. Root cause not yet identified.
-
-**OVS meters not enforced on kernel 7.x**
-OpenFlow meters are installed but not enforced in the kernel datapath. HTB queues provide the bandwidth floor. Meter enforcement is pending empirical verification.
-
-**UPF fails to start with "operation not supported"**
-gtp5g module is not loaded. Run `sudo modprobe gtp5g` then `docker restart upf`.
-
-**SMF panic: invalid argument to Intn**
-Caused by staticPools CIDR matching the full dynamic pool CIDR. Fixed by setting staticPools to /32 per UE. Already applied in smfcfg.yaml.
-
-**docker compose version warning**
-The `version` attribute in docker-compose.yaml is obsolete in Compose v2. The warning is harmless and can be ignored.
-
-**OVS does not emit port status events for ports added via ovs-vsctl**
-OFPPR_ADD is unreliable when adding ports to a connected OVS bridge via ovs-vsctl. The controller discovers runtime-added ports via the OpenFlow handshake port description reply instead. Do not rely on EventOFPPortStatus for this purpose.
-
-**Stale UE IP allocations after partial core restart**
-Symptom: `UE IP pool exhausted for DNN[internet] S-NSSAI[sst: X sd: XXXXXX]` in SMF logs.
-UE tunnel interface does not appear after `make ue-attach`.
-
-Root cause: SMF rebuilds its in-memory IP pool from existing UPF GTP sessions on startup.
-If UPF retains stale GTP tunnels from a previous run (due to UEs being killed without
-deregistration), SMF marks those IPs as in use on next startup even though no UE holds them.
-
-Workaround: always use `make down` followed by `make up` for full teardown and restart.
-Never restart SMF in isolation while UPF is running with active sessions.
-
-Pending fix: add a UPF health check and `depends_on` ordering in docker-compose.yaml so
-SMF only establishes PFCP association after UPF has started cleanly. This guarantees
-UPF starts with an empty GTP session table before SMF queries it.
+For 5GC-specific failure modes and diagnostic commands see [docs/debugging-5gc.md](debugging-5gc.md).

@@ -5,6 +5,7 @@ topology:
 
 clean-topology:
 	sudo mn -c
+	sudo pkill -f iperf3 2>/dev/null || true
 	sudo ovs-vsctl --if-exists del-port s1 s1-upf
 	sudo ovs-vsctl --if-exists del-port s1 upf-gw
 	sudo ovs-vsctl --all destroy QoS

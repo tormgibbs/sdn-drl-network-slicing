@@ -1,30 +1,48 @@
 defaults:
   duration_sec: 60
+  inter_loop_gap_sec: 5
 
 traffic_profiles:
   vle:
+    pattern: mixed
     protocol: tcp
-    target_bps: 40_000_000
-    parallel_flows: 10
+    continuous_bps: 50_000_000
+    continuous_port: 5201
+    on_off_bps: 30_000_000
+    on_off_port: 5202
+    mean_on_sec: 15
+    mean_off_sec: 45
     device_count: 3000
+    
   student_portal:
+    pattern: mixed
     protocol: tcp
-    target_bps: 20_000_000
-    parallel_flows: 8
+    continuous_bps: 25_000_000
+    continuous_port: 5201
+    on_off_bps: 20_000_000
+    on_off_port: 5202
+    mean_on_sec: 8
+    mean_off_sec: 20
     device_count: 2000
+    
   admin:
+    pattern: continuous
     protocol: tcp
-    target_bps: 8_000_000
-    parallel_flows: 4
+    target_bps: 10_000_000
+    port: 5201
     device_count: 500
+    
   iot:
+    pattern: continuous
     protocol: udp
-    target_bps: 51_200
-    parallel_flows: 5
+    target_bps: 64_000
     packet_size: 64
+    port: 5201
     device_count: 4000
+    
   general:
+    pattern: continuous
     protocol: tcp
-    target_bps: 4_000_000
-    parallel_flows: 4
+    target_bps: 5_000_000
+    port: 5201
     device_count: 500

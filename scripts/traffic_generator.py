@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 # scripts/traffic_generator.py
 # Runs continuous per-slice iperf3 traffic through the 5G GTP tunnels.
+# Supports continuous and mixed (continuous + ON/OFF burst) traffic patterns.
 # All slices run concurrently. Reads config/traffic.yaml.
 # Outputs JSON results per loop to logs/traffic/.
 
 import argparse
 import json
 import logging
+import random
 import signal
 import subprocess
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,43 +43,55 @@ SLICE_NETWORK = {
 def load_config() -> tuple[dict, dict]:
 	with open(CONFIG_PATH) as f:
 		config = yaml.safe_load(f)
-	defaults = config.get('defaults', {})
-	return config['traffic_profiles'], defaults
+	return config['traffic_profiles'], config.get('defaults', {})
 
 
-def build_cmd(
-	slice_name: str, profile: dict, network: dict, duration: int
-) -> list[str]:
+def _run_iperf3(
+	bind_ip: str,
+	server_ip: str,
+	port: int,
+	duration: int,
+	protocol: str,
+	target_bps: int,
+	packet_size: int | None = None,
+) -> dict:
 	cmd = [
 		'docker',
 		'exec',
 		'ueransim',
 		'iperf3',
 		'-c',
-		network['server_ip'],
+		server_ip,
 		'-B',
-		network['bind_ip'],
+		bind_ip,
+		'-p',
+		str(port),
 		'-t',
 		str(duration),
 		'-J',
 	]
-	if profile['protocol'] == 'udp':
-		cmd += [
-			'-u',
-			'-b',
-			str(profile['target_bps']),
-			'-l',
-			str(profile.get('packet_size', 1400)),
-		]
+	if protocol == 'udp':
+		cmd += ['-u', '-b', str(target_bps), '-l', str(packet_size or 1400)]
 	else:
-		cmd += ['-P', str(profile['parallel_flows'])]
-	return cmd
+		cmd += ['-b', str(target_bps)]
+
+	result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 15)
+	if result.returncode != 0:
+		raise RuntimeError(result.stderr.strip())
+	return json.loads(result.stdout)
 
 
-def extract_summary(slice_name: str, protocol: str, data: dict) -> dict:
+def _extract_summary(
+	slice_name: str, protocol: str, data: dict, label: str = ''
+) -> dict:
 	ts = datetime.now(timezone.utc).isoformat()
 	end = data.get('end', {})
-	summary = {'slice': slice_name, 'timestamp': ts, 'protocol': protocol}
+	summary = {
+		'slice': slice_name,
+		'component': label or 'continuous',
+		'timestamp': ts,
+		'protocol': protocol,
+	}
 
 	if protocol == 'udp':
 		sent = end.get('sum_sent', {})
@@ -99,36 +113,126 @@ def extract_summary(slice_name: str, protocol: str, data: dict) -> dict:
 	return summary
 
 
-def run_slice(slice_name: str, profile: dict, duration: int) -> dict:
-	network = SLICE_NETWORK[slice_name]
-	cmd = build_cmd(slice_name, profile, network, duration)
-	logger.info(
-		'Starting %s: %s → %s (%s)',
-		slice_name,
-		network['bind_ip'],
-		network['server_ip'],
-		profile['protocol'],
-	)
+def run_continuous_slice(
+	slice_name: str, profile: dict, network: dict, duration: int
+) -> list[dict]:
 	try:
-		result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 15)
-		if result.returncode != 0:
-			logger.error('%s failed: %s', slice_name, result.stderr.strip())
-			return {'slice': slice_name, 'error': result.stderr.strip()}
-		data = json.loads(result.stdout)
-		summary = extract_summary(slice_name, profile['protocol'], data)
+		data = _run_iperf3(
+			bind_ip=network['bind_ip'],
+			server_ip=network['server_ip'],
+			port=profile.get('port', 5201),
+			duration=duration,
+			protocol=profile['protocol'],
+			target_bps=profile['target_bps'],
+			packet_size=profile.get('packet_size'),
+		)
+		summary = _extract_summary(slice_name, profile['protocol'], data)
 		logger.info(
 			'%s: rx=%.2f Mbps loss=%.1f%%',
 			slice_name,
 			summary.get('receiver_mbps', 0),
 			summary.get('loss_pct', 0),
 		)
-		return summary
-	except subprocess.TimeoutExpired:
-		logger.error('%s timed out', slice_name)
-		return {'slice': slice_name, 'error': 'timeout'}
-	except json.JSONDecodeError as e:
-		logger.error('%s JSON parse error: %s', slice_name, e)
-		return {'slice': slice_name, 'error': 'json_parse_error'}
+		return [summary]
+	except Exception as e:
+		logger.error('%s continuous failed: %s', slice_name, e)
+		return [{'slice': slice_name, 'component': 'continuous', 'error': str(e)}]
+
+
+def run_on_off_component(
+	slice_name: str,
+	profile: dict,
+	network: dict,
+	duration: int,
+	stop_event: threading.Event,
+) -> list[dict]:
+	results = []
+	elapsed = 0
+	while elapsed < duration and not stop_event.is_set():
+		on_sec = max(1, int(random.expovariate(1.0 / profile['mean_on_sec'])))
+		on_sec = min(on_sec, duration - elapsed)
+		if on_sec <= 0:
+			break
+		try:
+			data = _run_iperf3(
+				bind_ip=network['bind_ip'],
+				server_ip=network['server_ip'],
+				port=profile.get('on_off_port', 5202),
+				duration=on_sec,
+				protocol=profile['protocol'],
+				target_bps=profile['on_off_bps'],
+			)
+			summary = _extract_summary(slice_name, profile['protocol'], data, label='on_off')
+			logger.info(
+				'%s on_off burst: rx=%.2f Mbps', slice_name, summary.get('receiver_mbps', 0)
+			)
+			results.append(summary)
+		except Exception as e:
+			logger.error('%s on_off burst failed: %s', slice_name, e)
+			results.append({'slice': slice_name, 'component': 'on_off', 'error': str(e)})
+
+		elapsed += on_sec
+		if elapsed >= duration or stop_event.is_set():
+			break
+
+		off_sec = max(1, int(random.expovariate(1.0 / profile['mean_off_sec'])))
+		off_sec = min(off_sec, duration - elapsed)
+		stop_event.wait(timeout=off_sec)
+		elapsed += off_sec
+
+	return results
+
+
+def run_mixed_slice(
+	slice_name: str, profile: dict, network: dict, duration: int
+) -> list[dict]:
+	results = []
+	stop_event = threading.Event()
+
+	def continuous():
+		try:
+			data = _run_iperf3(
+				bind_ip=network['bind_ip'],
+				server_ip=network['server_ip'],
+				port=profile.get('continuous_port', 5201),
+				duration=duration,
+				protocol=profile['protocol'],
+				target_bps=profile['continuous_bps'],
+			)
+			summary = _extract_summary(
+				slice_name, profile['protocol'], data, label='continuous'
+			)
+			logger.info(
+				'%s continuous: rx=%.2f Mbps', slice_name, summary.get('receiver_mbps', 0)
+			)
+			results.append(summary)
+		except Exception as e:
+			logger.error('%s continuous failed: %s', slice_name, e)
+			results.append({'slice': slice_name, 'component': 'continuous', 'error': str(e)})
+		finally:
+			stop_event.set()
+
+	t = threading.Thread(target=continuous, daemon=True)
+	t.start()
+
+	on_off_results = run_on_off_component(
+		slice_name, profile, network, duration, stop_event
+	)
+	results.extend(on_off_results)
+
+	t.join()
+	return results
+
+
+def run_slice(slice_name: str, profile: dict, duration: int) -> list[dict]:
+	network = SLICE_NETWORK[slice_name]
+	pattern = profile.get('pattern', 'continuous')
+	logger.info('Starting %s (%s pattern)', slice_name, pattern)
+
+	if pattern == 'mixed':
+		return run_mixed_slice(slice_name, profile, network, duration)
+	else:
+		return run_continuous_slice(slice_name, profile, network, duration)
 
 
 def save_results(results: list[dict], output_dir: Path) -> None:
@@ -180,20 +284,27 @@ def main():
 
 		logger.info('--- Loop %d ---', loop)
 		results = []
+		slice_results: dict[str, list] = {}
 
-		with ThreadPoolExecutor(max_workers=len(active_slices)) as executor:
-			futures = {
-				executor.submit(
-					run_slice,
-					name,
-					profiles[name],
-					profiles[name].get('duration_sec', default_duration),
-				): name
-				for name in active_slices
-				if running
-			}
-			for future in as_completed(futures):
-				results.append(future.result())
+		def run_and_collect(name, prof, dur):
+			slice_results[name] = run_slice(name, prof, dur)
+
+		threads = []
+		for name in active_slices:
+			if not running:
+				break
+			dur = profiles[name].get('duration_sec', default_duration)
+			t = threading.Thread(
+				target=run_and_collect, args=(name, profiles[name], dur), daemon=True
+			)
+			threads.append(t)
+			t.start()
+
+		for t in threads:
+			t.join()
+
+		for name in active_slices:
+			results.extend(slice_results.get(name, []))
 
 		if results:
 			save_results(results, LOG_DIR)
