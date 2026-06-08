@@ -9,6 +9,7 @@ clean-topology:
 	sudo ovs-vsctl --if-exists del-port s1 upf-gw
 	sudo ovs-vsctl --all destroy QoS
 	sudo ovs-vsctl --all destroy Queue
+	sudo ip link del s1-upf 2>/dev/null || true
 
 core-up:
 	cd infrastructure/free5gc && docker compose up -d

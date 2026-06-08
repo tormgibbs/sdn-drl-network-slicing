@@ -10,6 +10,8 @@ slices:
     min_throughput_bps: 50_000_000
     max_latency_ms: 100
     max_loss_pct: 0.5
+    sink_ip: 10.0.1.1
+    probe_interface: ue1tun0
 
   student_portal:
     vlan: 20
@@ -22,6 +24,8 @@ slices:
     min_throughput_bps: 25_000_000
     max_latency_ms: 50
     max_loss_pct: 0.1
+    sink_ip: 10.0.2.1
+    probe_interface: ue2tun0
 
   admin:
     vlan: 30
@@ -34,6 +38,8 @@ slices:
     min_throughput_bps: 10_000_000
     max_latency_ms: 150
     max_loss_pct: 1.0
+    sink_ip: 10.0.3.1
+    probe_interface: ue3tun0
 
   iot:
     vlan: 40
@@ -46,6 +52,8 @@ slices:
     min_throughput_bps: 64_000
     max_latency_ms: 200
     max_loss_pct: 5.0
+    sink_ip: 10.0.4.1
+    probe_interface: ue4tun0
 
   general:
     vlan: 50
@@ -58,6 +66,8 @@ slices:
     min_throughput_bps: 5_000_000
     max_latency_ms: 500
     max_loss_pct: 10.0
+    sink_ip: 10.0.5.1
+    probe_interface: ue5tun0
 
 network:
   total_bandwidth_bps: 100_000_000

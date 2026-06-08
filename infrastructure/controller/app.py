@@ -84,7 +84,7 @@ class CampusController(app_manager.OSKenApp):
 			install_core_rules(datapath)
 			install_upf_ingress_rules(datapath)
 		elif is_aggregation(dpid):
-			install_aggregation_rules(datapath)
+			install_aggregation_rules(name, datapath)
 			self.meter_manager.register_datapath(name, datapath)
 			self.stats_collector.register_datapath(name, datapath)
 		elif is_ap(dpid):

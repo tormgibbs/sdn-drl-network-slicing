@@ -107,10 +107,10 @@ class TestFlowInstallation:
 		dp.ofproto.OFPP_FLOOD = 0xFFFFFFFB
 		return dp
 
-	def test_install_aggregation_rules_sends_one_flow(self, loaded_maps):
+	def test_install_aggregation_rules_sends_correct_flows(self, loaded_maps):
 		dp = self._make_datapath(dpid=2)
-		fm.install_aggregation_rules(dp)
-		assert dp.send_msg.call_count == 1
+		fm.install_aggregation_rules('s2', dp)
+		assert dp.send_msg.call_count == 7
 
 	def test_install_ap_rules_non_ap1_sends_three_flows(self, loaded_maps):
 		dp = self._make_datapath(dpid=1152921504606846978)
@@ -185,3 +185,34 @@ class TestReturnPathRules:
 			fm.install_return_path_rules(dp, s1_upf_port=3)
 		assert dp.send_msg.call_count == 0
 		assert 'eth0_mac not in topology config' in caplog.text
+
+
+class TestConfigCaching:
+	def test_set_dpid_map_populates_topology_cache(self, loaded_maps):
+		assert fm._topology.get('topology', {}).get('aggregation_ports') is not None
+
+	def test_set_dpid_map_populates_slices_cache(self, loaded_maps):
+		vle = fm._slices_config.get('vle')
+		assert vle is not None
+		assert vle.get('vlan') == 10
+
+	def test_reset_state_clears_all_cached_state(self, loaded_maps):
+		fm.reset_state()
+		assert fm._topology == {}
+		assert fm._slices_config == {}
+		assert fm._dpid_role == {}
+		assert fm._ap_vlan_map == {}
+		assert fm._subnet_vlan_map == {}
+		assert fm._upf_config == {}
+
+	def test_install_aggregation_rules_uses_cached_topology(self, loaded_maps):
+		dp = MagicMock()
+		dp.id = 2
+		dp.ofproto.OFPVID_PRESENT = 0x1000
+		dp.ofproto.OFPIT_APPLY_ACTIONS = 4
+		dp.ofproto.OFPP_FLOOD = 0xFFFFFFFB
+		original_topology = fm._topology
+		fm._topology = {'topology': original_topology['topology']}
+		fm.install_aggregation_rules('s2', dp)
+		assert dp.send_msg.call_count == 7
+		fm._topology = original_topology

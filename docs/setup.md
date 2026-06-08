@@ -431,3 +431,18 @@ The `version` attribute in docker-compose.yaml is obsolete in Compose v2. The wa
 
 **OVS does not emit port status events for ports added via ovs-vsctl**
 OFPPR_ADD is unreliable when adding ports to a connected OVS bridge via ovs-vsctl. The controller discovers runtime-added ports via the OpenFlow handshake port description reply instead. Do not rely on EventOFPPortStatus for this purpose.
+
+**Stale UE IP allocations after partial core restart**
+Symptom: `UE IP pool exhausted for DNN[internet] S-NSSAI[sst: X sd: XXXXXX]` in SMF logs.
+UE tunnel interface does not appear after `make ue-attach`.
+
+Root cause: SMF rebuilds its in-memory IP pool from existing UPF GTP sessions on startup.
+If UPF retains stale GTP tunnels from a previous run (due to UEs being killed without
+deregistration), SMF marks those IPs as in use on next startup even though no UE holds them.
+
+Workaround: always use `make down` followed by `make up` for full teardown and restart.
+Never restart SMF in isolation while UPF is running with active sessions.
+
+Pending fix: add a UPF health check and `depends_on` ordering in docker-compose.yaml so
+SMF only establishes PFCP association after UPF has started cleanly. This guarantees
+UPF starts with an empty GTP session table before SMF queries it.

@@ -31,6 +31,9 @@ fi
 echo "    UPF MAC: $UPF_MAC"
 
 echo "[3/7] Adding s1-upf to OVS s1..."
+sudo ip link add s1-upf type veth peer name upf-s1 2>/dev/null || true
+sudo ip link set s1-upf up
+sudo ip link set upf-s1 up
 sudo ovs-vsctl --may-exist add-port s1 s1-upf
 
 echo "[4/7] Adding upf-s1 to br-free5gc..."

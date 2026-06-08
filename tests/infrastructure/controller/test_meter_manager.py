@@ -102,7 +102,9 @@ class TestRegisterDatapath:
 
 		with patch.object(manager, '_install_meters_for_switch') as mock_install:
 			manager.register_datapath('s3', _make_datapath())
-			mock_install.assert_called_once_with('s3', manager._current_allocations)
+			call_args = mock_install.call_args[0]
+			assert call_args[0] == 's3'
+			assert call_args[1] == manager._current_allocations
 
 	def test_reconnect_uses_current_allocations_not_defaults(self, manager):
 		manager.register_datapath('s2', _make_datapath())
@@ -119,7 +121,7 @@ class TestRegisterDatapath:
 
 		with patch.object(manager, '_install_meters_for_switch') as mock_install:
 			manager.register_datapath('s3', _make_datapath())
-			_, called_allocations = mock_install.call_args[0]
+			_, called_allocations, *_ = mock_install.call_args[0]
 			assert called_allocations == custom
 
 

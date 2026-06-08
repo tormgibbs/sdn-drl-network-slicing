@@ -61,7 +61,12 @@ class MeterManager:
 				'Aggregation switch reconnected: %s -- re-applying current allocations',
 				switch_name,
 			)
-			self._install_meters_for_switch(switch_name, self._current_allocations)
+			self._install_meters_for_switch(
+				switch_name,
+				self._current_allocations,
+				self._load_topology(),
+				self._load_slices(),
+			)
 
 	def _install_default_meters(self) -> None:
 		slices = self._load_slices()
@@ -85,14 +90,15 @@ class MeterManager:
 		aggregation_ports = topology['topology']['aggregation_ports']
 
 		for switch_name in aggregation_ports:
-			self._install_meters_for_switch(switch_name, allocations)
+			self._install_meters_for_switch(switch_name, allocations, topology, slices)
 
 	def _install_meters_for_switch(
-		self, switch_name: str, allocations: dict[str, float]
+		self,
+		switch_name: str,
+		allocations: dict[str, float],
+		topology: dict,
+		slices: dict,
 	) -> None:
-		topology = self._load_topology()
-		slices = self._load_slices()
-
 		total_bw = slices['network']['total_bandwidth_bps']
 		ap_slice_map = topology['topology']['ap_slice_map']
 		aggregation_ports = topology['topology']['aggregation_ports']
@@ -105,7 +111,6 @@ class MeterManager:
 		port_config = aggregation_ports[switch_name]
 		core_port = port_config['core_port']
 		ap_ports = port_config['ap_ports']
-
 		metered_vlans: set[int] = set()
 
 		for ap_name, ap_port_no in ap_ports.items():
@@ -118,13 +123,13 @@ class MeterManager:
 			vlan_id = slice_cfg['vlan']
 			fraction = allocations.get(slice_name, 0.0)
 			rate_bps = max(int(fraction * total_bw), slice_cfg['min_throughput_bps'])
-
 			meter_id = _METER_ID_BY_AP[ap_name]
+
 			self._replace_meter(datapath, meter_id, rate_bps)
-			self._install_meter_flow(datapath, meter_id, vlan_id, ap_port_no)
+			self._install_meter_flow(datapath, meter_id, vlan_id, ap_port_no, core_port)
 
 			if vlan_id not in metered_vlans:
-				self._install_meter_flow(datapath, meter_id, vlan_id, core_port)
+				self._install_meter_flow(datapath, meter_id, vlan_id, core_port, ap_port_no)
 				metered_vlans.add(vlan_id)
 
 			logger.info(
@@ -170,7 +175,7 @@ class MeterManager:
 		)
 
 	def _install_meter_flow(
-		self, datapath: object, meter_id: int, vlan_id: int, port_no: int
+		self, datapath: object, meter_id: int, vlan_id: int, in_port: int, out_port: int
 	) -> None:
 		ofp = datapath.ofproto
 		ofp_parser = datapath.ofproto_parser
@@ -180,7 +185,7 @@ class MeterManager:
 			ofp_parser.OFPInstructionMeter(meter_id),
 			ofp_parser.OFPInstructionActions(
 				ofp.OFPIT_APPLY_ACTIONS,
-				[ofp_parser.OFPActionOutput(ofp.OFPP_FLOOD)],
+				[ofp_parser.OFPActionOutput(out_port)],
 			),
 		]
 		datapath.send_msg(
@@ -188,7 +193,7 @@ class MeterManager:
 				datapath=datapath,
 				priority=15,
 				match=ofp_parser.OFPMatch(
-					in_port=port_no,
+					in_port=in_port,
 					vlan_vid=(vlan_id | 0x1000),
 				),
 				instructions=inst,

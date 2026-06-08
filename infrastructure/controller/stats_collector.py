@@ -1,8 +1,11 @@
 # infrastructure/controller/stats_collector.py
-# Collects OpenFlow port statistics from aggregation switches and maintains
-# a per-slice cache for non-blocking reads by the REST layer.
+# Collects per-slice metrics: throughput from OpenFlow port statistics,
+# latency and loss from active ICMP probes through UE tunnels.
 
 import logging
+import re
+import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -12,15 +15,28 @@ from os_ken.lib import hub
 logger = logging.getLogger(__name__)
 
 _TOPOLOGY_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'topology.yaml'
+_SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
+
+_PING_COUNT = 4
+_PING_INTERVAL = 0.2
+_PING_TIMEOUT = 1
+
+_RTT_RE = re.compile(r'rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms')
+_LOSS_RE = re.compile(r'(\d+)% packet loss')
+
+_EXPECTED_REPLIES = 2
+_OFP_REPLY_WAIT_SEC = 1.0
 
 
 class StatsCollector:
 	def __init__(
 		self,
 		topology_config: Path = _TOPOLOGY_CONFIG,
+		slices_config: Path = _SLICES_CONFIG,
 		interval_sec: int = 5,
 	) -> None:
 		self._topology_config = topology_config
+		self._slices_config = slices_config
 		self._interval_sec = interval_sec
 		self._datapaths: dict[str, object] = {}
 		self._stats_cache: dict[str, dict] = {}
@@ -28,9 +44,13 @@ class StatsCollector:
 		self._prev_time: dict[str, float] = {}
 		self._running = False
 		self._topology: dict | None = None
-		# hub.BoundedSemaphore is hub-aware. threading.Lock is not safe here
-		# because get_stats() may be called from the REST handler, which may
-		# run outside the hub's greenlet pool depending on WSGI configuration.
+		self._slices: dict | None = None
+		# Shared between handle_port_stats_reply and _run_probe_cycle, safe
+		# because both run in the same hub greenlet context.
+		self._pending_throughput: dict[str, float] = {}
+		self._reply_count: int = 0
+		self._reply_event: threading.Event | None = None
+		# threading.Lock is not safe here; get_stats() may run outside the hub's greenlet pool.
 		self._cache_lock = hub.BoundedSemaphore(1)
 
 	def _get_topology(self) -> dict:
@@ -38,6 +58,12 @@ class StatsCollector:
 			with open(self._topology_config) as f:
 				self._topology = yaml.safe_load(f)
 		return self._topology
+
+	def _get_slices(self) -> dict:
+		if self._slices is None:
+			with open(self._slices_config) as f:
+				self._slices = yaml.safe_load(f)
+		return self._slices
 
 	def register_datapath(self, switch_name: str, datapath: object) -> None:
 		self._datapaths[switch_name] = datapath
@@ -63,8 +89,34 @@ class StatsCollector:
 
 	def _collection_loop(self) -> None:
 		while self._running:
-			self._request_stats()
-			hub.sleep(self._interval_sec)
+			try:
+				cycle_start = time.time()
+				self._pending_throughput.clear()
+				self._reply_count = 0
+				self._reply_event = threading.Event()
+
+				self._request_stats()
+
+				fired = self._reply_event.wait(
+					timeout=min(_OFP_REPLY_WAIT_SEC, self._interval_sec * 0.2)
+				)
+				if not fired:
+					logger.warning(
+						'Stats collector: only %d/%d OFP replies received',
+						self._reply_count,
+						_EXPECTED_REPLIES,
+					)
+
+				self._run_probe_cycle()
+
+				elapsed = time.time() - cycle_start
+				remaining = self._interval_sec - elapsed
+				if remaining > 0:
+					hub.sleep(remaining)
+
+			except Exception:
+				logger.exception('Stats collector: unhandled exception in collection loop')
+				hub.sleep(self._interval_sec)
 
 	def _request_stats(self) -> None:
 		topology = self._get_topology()
@@ -97,8 +149,6 @@ class StatsCollector:
 
 		now = time.time()
 
-		slice_accum: dict[str, dict] = {}
-
 		for stat in stats:
 			slice_name = port_slice_map.get(stat.port_no)
 			if slice_name is None:
@@ -116,7 +166,7 @@ class StatsCollector:
 				self._prev_bytes[rx_key] = stat.rx_bytes
 				self._prev_time[tx_key] = now
 				logger.warning(
-					'Port counter reset detected: switch=%s port=%d -- skipping interval',
+					'Stats collector: port counter reset: switch=%s port=%d -- skipping interval',
 					switch_name,
 					stat.port_no,
 				)
@@ -127,51 +177,112 @@ class StatsCollector:
 			self._prev_time[tx_key] = now
 
 			elapsed = now - prev_time
-			if elapsed > 0:
-				port_tx_bps = ((stat.tx_bytes - prev_tx) * 8) / elapsed
-				port_rx_bps = ((stat.rx_bytes - prev_rx) * 8) / elapsed
-			else:
-				port_tx_bps = 0.0
-				port_rx_bps = 0.0
+			port_tx_bps = ((stat.tx_bytes - prev_tx) * 8) / elapsed if elapsed > 0 else 0.0
 
-			if slice_name not in slice_accum:
-				slice_accum[slice_name] = {
-					'tx_bytes': 0,
-					'rx_bytes': 0,
-					'tx_packets': 0,
-					'rx_packets': 0,
-					'tx_errors': 0,
-					'rx_errors': 0,
-					'duration_sec': stat.duration_sec,
-					'tx_throughput_bps': 0.0,
-					'rx_throughput_bps': 0.0,
-				}
+			self._pending_throughput[slice_name] = self._pending_throughput.get(
+				slice_name, 0.0
+			) + max(0.0, port_tx_bps)
 
-			acc = slice_accum[slice_name]
-			acc['tx_bytes'] += stat.tx_bytes
-			acc['rx_bytes'] += stat.rx_bytes
-			acc['tx_packets'] += stat.tx_packets
-			acc['rx_packets'] += stat.rx_packets
-			acc['tx_errors'] += stat.tx_errors
-			acc['rx_errors'] += stat.rx_errors
-			acc['tx_throughput_bps'] += port_tx_bps
-			acc['rx_throughput_bps'] += port_rx_bps
+		self._reply_count += 1
+		if self._reply_count >= _EXPECTED_REPLIES:
+			logger.debug('Stats collector: all OFP replies received')
+			if self._reply_event is not None:
+				self._reply_event.set()
 
-		updated: dict[str, dict] = {}
-		for slice_name, acc in slice_accum.items():
-			updated[slice_name] = {
-				'tx_bytes': acc['tx_bytes'],
-				'rx_bytes': acc['rx_bytes'],
-				'tx_packets': acc['tx_packets'],
-				'rx_packets': acc['rx_packets'],
-				'tx_errors': acc['tx_errors'],
-				'rx_errors': acc['rx_errors'],
-				'duration_sec': acc['duration_sec'],
-				'tx_throughput_bps': max(0.0, acc['tx_throughput_bps']),
-				'rx_throughput_bps': max(0.0, acc['rx_throughput_bps']),
+	def _probe_slice(
+		self,
+		results: dict,
+		slice_name: str,
+		sink_ip: str,
+		probe_interface: str,
+	) -> None:
+		# subprocess is monkey-patched by eventlet so this yields cooperatively.
+		# No logging inside this method; logging mutexes are not greenlet-safe.
+		try:
+			result = subprocess.run(
+				[
+					'docker',
+					'exec',
+					'ueransim',
+					'ping',
+					'-I',
+					probe_interface,
+					'-c',
+					str(_PING_COUNT),
+					'-i',
+					str(_PING_INTERVAL),
+					'-W',
+					str(_PING_TIMEOUT),
+					sink_ip,
+				],
+				capture_output=True,
+				text=True,
+				timeout=10,
+			)
+			output = result.stdout
+			rtt_match = _RTT_RE.search(output)
+			loss_match = _LOSS_RE.search(output)
+			# Divide by 2: ping reports round-trip, state space requires one-way.
+			latency_ms = float(rtt_match.group(1)) / 2.0 if rtt_match else None
+			loss_pct = float(loss_match.group(1)) if loss_match else None
+			results[slice_name] = {
+				'latency_ms': latency_ms,
+				'loss_pct': loss_pct,
+				'error': None,
+			}
+		except Exception as exc:
+			results[slice_name] = {
+				'latency_ms': None,
+				'loss_pct': None,
+				'error': str(exc),
 			}
 
-		with self._cache_lock:
-			self._stats_cache.update(updated)
+	def _run_probe_cycle(self) -> None:
+		slices_cfg = self._get_slices()['slices']
+		probe_results: dict[str, dict] = {}
 
-		logger.debug('Stats cache updated for switch=%s', switch_name)
+		logger.debug(
+			'Stats collector: starting probe cycle for slices=%s', list(slices_cfg.keys())
+		)
+
+		greenlets = []
+		for slice_name, cfg in slices_cfg.items():
+			sink_ip = cfg.get('sink_ip')
+			probe_interface = cfg.get('probe_interface')
+			if not sink_ip or not probe_interface:
+				logger.warning(
+					'Stats collector: probe config missing for slice %s -- skipping',
+					slice_name,
+				)
+				continue
+			gt = hub.spawn(
+				self._probe_slice,
+				probe_results,
+				slice_name,
+				sink_ip,
+				probe_interface,
+			)
+			greenlets.append(gt)
+
+		for gt in greenlets:
+			gt.wait()
+
+		for slice_name, probe in probe_results.items():
+			if probe['error']:
+				logger.warning(
+					'Stats collector: probe failed for slice %s: %s',
+					slice_name,
+					probe['error'],
+				)
+
+		with self._cache_lock:
+			for slice_name, probe in probe_results.items():
+				self._stats_cache[slice_name] = {
+					'tx_throughput_bps': self._pending_throughput.get(slice_name, 0.0),
+					'latency_ms': probe['latency_ms'],
+					'loss_pct': probe['loss_pct'],
+				}
+
+		logger.info(
+			'Stats collector: cache updated for slices=%s', list(probe_results.keys())
+		)
