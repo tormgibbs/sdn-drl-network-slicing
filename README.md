@@ -30,7 +30,7 @@ For a system architecture overview see [docs/system-overview.md](docs/system-ove
 |----------|-------------|
 | [docs/setup.md](docs/setup.md) | Installation and startup guide |
 | [docs/system-overview.md](docs/system-overview.md) | Architecture and component descriptions |
-| [docs/traffic-config.md](docs/traffic-config.md) | Traffic generator configuration |
+| [docs/traffic-configuration.md](docs/traffic-configuration.md) | Traffic generator configuration |
 | [docs/subscriber-registration.md](docs/subscriber-registration.md) | free5GC subscriber setup |
 | [docs/drl-agent-design.md](docs/drl-agent-design.md) | DRL agent state space, reward function, algorithm |
 | [docs/known-issues.md](docs/known-issues.md) | Known issues and workarounds |
