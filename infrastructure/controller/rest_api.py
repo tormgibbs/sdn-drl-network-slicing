@@ -5,11 +5,13 @@
 # at controller startup. Registry is frozen after init so reads are safe from
 # any thread with no locking required.
 
+import asyncio
 import logging
 import threading
+from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,8 @@ class _Registry:
 		self._stats_collector = None
 		self._meter_manager = None
 		self._frozen = False
+		self.loop = None
+		self.ws_clients = set()
 
 	def register(self, stats_collector, meter_manager) -> None:
 		if self._frozen:
@@ -63,11 +67,20 @@ def _get_meter_manager():
 	return mm
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+	registry.loop = asyncio.get_running_loop()
+	yield
+	registry.loop = None
+
+
 app = FastAPI(
 	title='SDN Slicing Controller API',
 	description='Northbound REST API for slice metrics and bandwidth allocation',
 	version='0.1.0',
+	lifespan=_lifespan,
 )
+
 
 app.add_middleware(
 	CORSMiddleware,
@@ -80,6 +93,30 @@ app.add_middleware(
 @app.get('/health')
 def health():
 	return {'status': 'ok', 'registry_frozen': registry.frozen}
+
+
+@app.websocket('/ws/metrics')
+async def ws_metrics(websocket: WebSocket):
+	await websocket.accept()
+	registry.ws_clients.add(websocket)
+	try:
+		while True:
+			# Connection is push-only; block here until client disconnects.
+			await websocket.receive_text()
+	except WebSocketDisconnect:
+		pass
+	finally:
+		registry.ws_clients.discard(websocket)
+
+
+async def broadcast_metrics(data: dict) -> None:
+	dead = set()
+	for ws in registry.ws_clients:
+		try:
+			await ws.send_json(data)
+		except Exception:
+			dead.add(ws)
+	registry.ws_clients -= dead
 
 
 @app.get('/metrics')

@@ -53,4 +53,24 @@ Pending fix: add a UPF health check and `depends_on` ordering in docker-compose.
 
 ---
 
+## gNB fails to connect to AMF on fresh `make up`
+
+Symptom: `make ue-setup` times out waiting for `ue1tun0`; `docker logs ueransim`
+shows `SCTP could not connect: Connection refused` followed by UEs detecting
+gNB signal but never sending NAS messages.
+
+Cause: AMF's NGAP listener (port 38412) isn't ready when gNB attempts its
+initial SCTP connection. gNB does not retry. This is a known gap in upstream
+free5gc-compose (same depends_on pattern, no healthcheck).
+
+Fix: `docker compose restart ueransim` (from infrastructure/free5gc/), then
+`docker exec ueransim pkill -f nr-ue`, then `make ue-attach && make ue-setup`.
+
+Proposed fix (not yet applied): AMF healthcheck on SBI port 8000 + `condition:
+service_healthy` for ueransim. Heuristic (SBI readiness != NGAP readiness
+guarantee) - needs verification across multiple `make down`/`make up` cycles
+before trusting it. Tracked in PENDING.
+
+---
+
 For 5GC-specific failure modes and diagnostic commands see `docs/debugging-5gc.md`.

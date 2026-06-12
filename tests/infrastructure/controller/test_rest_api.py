@@ -3,19 +3,27 @@
 # validation. Uses FastAPI TestClient for in-process route testing without a
 # running server.
 
-from unittest.mock import MagicMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from infrastructure.controller.rest_api import app, registry
+from infrastructure.controller.rest_api import (
+	_Registry,
+	app,
+	broadcast_metrics,
+	registry,
+)
 
 
 @pytest.fixture(autouse=True)
 def reset_registry():
 	registry.reset()
+	registry.ws_clients = set()
 	yield
 	registry.reset()
+	registry.ws_clients = set()
 
 
 def _make_stats_collector(stats: dict):
@@ -190,3 +198,61 @@ class TestAllocate:
 		alloc = {k: 0.0 for k in SLICE_NAMES}
 		resp = client.post('/allocate', json=alloc)
 		assert resp.status_code == 422
+
+
+class TestRegistryDefaults:
+	def test_fresh_registry_has_no_loop(self):
+		r = _Registry()
+		assert r.loop is None
+
+	def test_fresh_registry_has_empty_ws_clients(self):
+		r = _Registry()
+		assert r.ws_clients == set()
+
+
+class TestBroadcastMetrics:
+	def test_sends_to_all_clients(self):
+		ws1 = MagicMock()
+		ws1.send_json = AsyncMock()
+		ws2 = MagicMock()
+		ws2.send_json = AsyncMock()
+		registry.ws_clients = {ws1, ws2}
+
+		payload = {'vle': {'tx_throughput_bps': 1.0}}
+		asyncio.run(broadcast_metrics(payload))
+
+		ws1.send_json.assert_awaited_once_with(payload)
+		ws2.send_json.assert_awaited_once_with(payload)
+
+	def test_dead_client_removed_from_registry(self):
+		good = MagicMock()
+		good.send_json = AsyncMock()
+		dead = MagicMock()
+		dead.send_json = AsyncMock(side_effect=RuntimeError('client disconnected'))
+		registry.ws_clients = {good, dead}
+
+		asyncio.run(broadcast_metrics({}))
+
+		assert dead not in registry.ws_clients
+		assert good in registry.ws_clients
+
+	def test_empty_clients_does_not_raise(self):
+		registry.ws_clients = set()
+		asyncio.run(broadcast_metrics({'vle': {}}))
+
+	def test_multiple_dead_clients_pruned_without_affecting_survivors(self):
+		survivors = [MagicMock() for _ in range(2)]
+		for ws in survivors:
+			ws.send_json = AsyncMock()
+		failures = [MagicMock() for _ in range(3)]
+		for ws in failures:
+			ws.send_json = AsyncMock(side_effect=RuntimeError('client disconnected'))
+
+		registry.ws_clients = set(survivors + failures)
+
+		payload = {'vle': {'tx_throughput_bps': 1.0}}
+		asyncio.run(broadcast_metrics(payload))
+
+		assert registry.ws_clients == set(survivors)
+		for ws in survivors:
+			ws.send_json.assert_awaited_once_with(payload)

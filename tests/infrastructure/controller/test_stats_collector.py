@@ -335,3 +335,51 @@ class TestProbeCycle:
 class TestRequestStats:
 	def test_no_datapaths_does_not_raise(self, collector):
 		collector._request_stats()
+
+
+class TestBroadcast:
+	def test_no_broadcast_when_loop_is_none(self, collector):
+		with (
+			patch(
+				'infrastructure.controller.stats_collector.rest_api.registry'
+			) as mock_registry,
+			patch(
+				'infrastructure.controller.stats_collector.rest_api.broadcast_metrics'
+			) as mock_broadcast,
+			patch(
+				'infrastructure.controller.stats_collector.asyncio.run_coroutine_threadsafe'
+			) as mock_run,
+		):
+			mock_registry.loop = None
+			_run_probe_cycle_with_mock(collector)
+
+		mock_broadcast.assert_not_called()
+		mock_run.assert_not_called()
+
+	def test_broadcast_called_when_loop_set(self, collector):
+		# Unit-level only: verifies the call signature (snapshot + loop passed
+		# to run_coroutine_threadsafe), not that cross-thread dispatch actually
+		# delivers to a real asyncio loop/websocket. That path was manually
+		# verified end-to-end via a live websocket client during development;
+		# see PENDING for automating it as an integration test.
+		mock_loop = MagicMock()
+		sentinel_coro = object()
+		with (
+			patch(
+				'infrastructure.controller.stats_collector.rest_api.registry'
+			) as mock_registry,
+			patch(
+				'infrastructure.controller.stats_collector.rest_api.broadcast_metrics',
+				new_callable=MagicMock,
+				return_value=sentinel_coro,
+			) as mock_broadcast,
+			patch(
+				'infrastructure.controller.stats_collector.asyncio.run_coroutine_threadsafe'
+			) as mock_run,
+		):
+			mock_registry.loop = mock_loop
+			_run_probe_cycle_with_mock(collector)
+
+		expected_snapshot = collector.get_stats()
+		mock_broadcast.assert_called_once_with(expected_snapshot)
+		mock_run.assert_called_once_with(sentinel_coro, mock_loop)

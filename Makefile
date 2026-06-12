@@ -1,4 +1,4 @@
-.PHONY: topology clean-topology core-up core-down core-status controller controller-bg module-load test ue-attach ue-status network-setup ue-setup up logs down traffic-start traffic-stop
+.PHONY: topology clean-topology core-up core-down core-status controller module-load test ue-attach ue-status network-setup ue-setup up down traffic-start traffic-stop
 
 topology:
 	sudo python3 infrastructure/topology/campus_topology.py
@@ -57,13 +57,6 @@ ue-setup:
 	docker exec ueransim ip route add 10.0.3.0/24 dev ue3tun0 2>/dev/null || true
 	docker exec ueransim ip route add 10.0.4.0/24 dev ue4tun0 2>/dev/null || true
 	docker exec ueransim ip route add 10.0.5.0/24 dev ue5tun0 2>/dev/null || true
-
-logs:
-	mkdir -p logs
-
-controller-bg: logs
-	sudo $(shell which uv) run infrastructure/controller/run.py > logs/controller.log 2>&1 &
-	@echo "Controller started. Monitoring: tail -f logs/controller.log"
 
 up: core-up module-load
 	@echo ""

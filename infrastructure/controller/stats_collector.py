@@ -2,6 +2,7 @@
 # Collects per-slice metrics: throughput from OpenFlow port statistics,
 # latency and loss from active ICMP probes through UE tunnels.
 
+import asyncio
 import logging
 import re
 import subprocess
@@ -11,6 +12,8 @@ from pathlib import Path
 
 import yaml
 from os_ken.lib import hub
+
+from infrastructure.controller import rest_api
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +285,16 @@ class StatsCollector:
 					'latency_ms': probe['latency_ms'],
 					'loss_pct': probe['loss_pct'],
 				}
+			snapshot = {
+				slice_name: dict(metrics) for slice_name, metrics in self._stats_cache.items()
+			}
 
 		logger.info(
 			'Stats collector: cache updated for slices=%s', list(probe_results.keys())
 		)
+
+		loop = rest_api.registry.loop
+		if loop is None:
+			logger.debug('Stats collector: rest_api loop not yet ready -- skipping broadcast')
+		else:
+			asyncio.run_coroutine_threadsafe(rest_api.broadcast_metrics(snapshot), loop)
