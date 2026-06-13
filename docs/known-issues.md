@@ -2,6 +2,53 @@
 
 ---
 
+## mac80211_hwsim not found on cloud VPS (DigitalOcean, likely others)
+
+**Symptom:**
+
+```
+modprobe: FATAL: Module mac80211_hwsim not found in directory /lib/modules/<kernel>-generic
+find: '/sys/kernel/debug/ieee80211': No such file or directory
+Warning! Error when loading mac80211_hwsim.
+```
+
+occurs when running `sudo mn --wifi --test pingall` after Mininet-WiFi install.
+
+**Cause:**
+
+Cloud provider kernel images (DO's `generic` kernel, also reported on AWS EC2)
+ship `linux-modules-<version>` but omit `linux-modules-extra-<version>`, which
+contains `cfg80211.ko`, `mac80211.ko`, `mac80211_hwsim.ko`, and related wireless
+modules. The kernel config shows these as built (`CONFIG_CFG80211=m`,
+`CONFIG_MAC80211=m`, `CONFIG_MAC80211_HWSIM=m`), but the .ko files are simply
+not installed on the system.
+
+**Fix:**
+
+```bash
+sudo apt install -y linux-modules-extra-$(uname -r)
+sudo modprobe mac80211_hwsim
+echo "mac80211_hwsim" | sudo tee -a /etc/modules-load.d/gtp5g.conf
+```
+
+**Verify:**
+
+```bash
+find /lib/modules/$(uname -r) -iname "*80211*"
+lsmod | grep -E "mac80211|cfg80211|hwsim"
+sudo mn -c && sudo mn --wifi --test pingall
+```
+
+Expect `0% dropped`.
+
+**Note:** if the kernel updates, re-check that `linux-modules-extra-<new-version>`
+is installed — same caveat as the gtp5g rebuild note. Standard kernel
+meta-package upgrades usually pull both `linux-modules` and `linux-modules-extra`
+together if both are already installed, but worth confirming after `apt upgrade`
++ reboot.
+
+---
+
 **gtp5g lost after kernel update**
 The module is installed per kernel version. After any kernel update, rebuild from source (see setup.md Section 6).
 
