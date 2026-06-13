@@ -59,11 +59,6 @@ Mininet-WiFi does not automatically trigger wpa_supplicant per station. Use manu
 
 ---
 
-**OVS meters not enforced on kernel 7.x**
-OpenFlow meters are installed but not enforced in the kernel datapath. HTB queues provide the bandwidth floor. Meter enforcement is pending empirical verification.
-
----
-
 **UPF fails to start with "operation not supported"**
 gtp5g module is not loaded. Run `sudo modprobe gtp5g` then `docker restart upf`.
 

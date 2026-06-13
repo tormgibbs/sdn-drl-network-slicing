@@ -110,7 +110,7 @@ class TestFlowInstallation:
 	def test_install_aggregation_rules_sends_correct_flows(self, loaded_maps):
 		dp = self._make_datapath(dpid=2)
 		fm.install_aggregation_rules('s2', dp)
-		assert dp.send_msg.call_count == 7
+		assert dp.send_msg.call_count == 1
 
 	def test_install_ap_rules_non_ap1_sends_three_flows(self, loaded_maps):
 		dp = self._make_datapath(dpid=1152921504606846978)
@@ -214,5 +214,23 @@ class TestConfigCaching:
 		original_topology = fm._topology
 		fm._topology = {'topology': original_topology['topology']}
 		fm.install_aggregation_rules('s2', dp)
-		assert dp.send_msg.call_count == 7
+		assert dp.send_msg.call_count == 1
 		fm._topology = original_topology
+
+	def test_install_aggregation_rules_warns_on_missing_slice_config(
+		self, loaded_maps, caplog
+	):
+		import logging
+
+		del fm._slices_config['vle']
+		dp = MagicMock()
+		dp.id = 2
+		dp.ofproto.OFPVID_PRESENT = 0x1000
+		dp.ofproto.OFPIT_APPLY_ACTIONS = 4
+		dp.ofproto.OFPP_FLOOD = 0xFFFFFFFB
+		with caplog.at_level(
+			logging.WARNING, logger='infrastructure.controller.flow_manager'
+		):
+			fm.install_aggregation_rules('s2', dp)
+		assert 'vle' in caplog.text
+		assert 'not in slices config' in caplog.text

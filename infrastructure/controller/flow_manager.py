@@ -163,7 +163,6 @@ def install_ap_rules(datapath: object, ap_name: str, vlan_id: int) -> None:
 
 
 def install_aggregation_rules(switch_name: str, datapath: object) -> None:
-	ofp = datapath.ofproto
 	ofp_parser = datapath.ofproto_parser
 
 	aggregation_ports = _topology['topology']['aggregation_ports']
@@ -176,37 +175,22 @@ def install_aggregation_rules(switch_name: str, datapath: object) -> None:
 		)
 		return
 
-	core_port = port_config['core_port']
 	ap_ports = port_config['ap_ports']
 
-	for ap_name, ap_port in ap_ports.items():
+	for ap_name in ap_ports:
 		slice_name = ap_slice_map.get(ap_name)
 		if slice_name is None:
 			continue
 
-		slice_cfg = _slices_config.get(slice_name)
-		if slice_cfg is None:
+		if slice_name not in _slices_config:
 			logger.warning(
 				'Slice %s in ap_slice_map but not in slices config -- skipping', slice_name
 			)
-			continue
 
-		vlan_id = slice_cfg['vlan']
-
-		match_down = ofp_parser.OFPMatch(
-			in_port=core_port,
-			vlan_vid=(vlan_id | ofp.OFPVID_PRESENT),
-		)
-		actions_down = [ofp_parser.OFPActionOutput(ap_port)]
-		_add_flow(datapath, priority=20, match=match_down, actions=actions_down)
-
-		match_up = ofp_parser.OFPMatch(
-			in_port=ap_port,
-			vlan_vid=(vlan_id | ofp.OFPVID_PRESENT),
-		)
-		actions_up = [ofp_parser.OFPActionOutput(core_port)]
-		_add_flow(datapath, priority=20, match=match_up, actions=actions_up)
-
+	# Per-VLAN forwarding (both directions, meter attached) is installed by
+	# meter_manager._install_meter_flow at priority=20. A separate unmetered
+	# rule at equal-or-higher priority here would shadow it and the meter
+	# would never be evaluated.
 	_add_flow(datapath, priority=5, match=ofp_parser.OFPMatch(), actions=[])
 
 	logger.info(

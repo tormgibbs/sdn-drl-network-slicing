@@ -69,9 +69,24 @@ Weighted packet loss penalty across all slices.
 
 **Resource Utilisation Reward (R_util)**
 
-R_util = Σ (ai / C)
+R_util = Σ min(ai, demand_i) / C
 
-Rewards efficient use of total available bandwidth.
+Rewards allocating capacity to slices that actually use it. `demand_i` is the
+slice's offered load in bps, taken from the raw OVS port-stat
+delta-bytes/elapsed-time measurement — the same intermediate value used to
+compute `utilisation_i` for the state vector, but retained pre-normalization
+so it shares units with `ai` and `C`.
+
+`min(ai, demand_i)` caps credit at the allocated ceiling: the agent gets no
+utilisation credit for demand beyond what it chose to allocate (that shortfall
+is already penalised via `P_latency`/`P_loss`/`R_SLA`), and gets no credit for
+allocation beyond what a slice actually used (preventing the agent from
+"parking" unused ceiling on an idle slice to inflate this term).
+
+**Previous formulation removed:** R_util = Σ (ai/C) was a constant equal to 1
+on every step, since `Σ ai = C` by construction of the softmax-normalised
+action space (see Action Space guarantees). It contributed a fixed offset to
+the reward and provided no learning signal.
 
 **Fairness Penalty (P_fairness)**
 
@@ -163,3 +178,13 @@ PPO is selected because the campus network traffic conditions are dynamic and ch
 - All state metrics normalised before neural network input
 - HTB floors protect against complete starvation — agent operates above floors
 - Agent controls meter ceilings only, not HTB floors
+
+
+## Key Implementation Constraints
+
+- `step()` blocks on WebSocket, not polling `/metrics` — ensures observation is always fresh
+- Softmax applied inside the Gymnasium environment before sending to `/allocate`, not by the controller
+- All state metrics normalised before neural network input
+- HTB floors protect against complete starvation — agent operates above floors
+- Agent controls meter ceilings only, not HTB floors
+- Reward computation requires raw pre-normalization demand_i (bps) per slice from stats_collector, in addition to the normalized [0,1] observation vector
