@@ -191,7 +191,7 @@ class MeterManager:
 		datapath.send_msg(
 			ofp_parser.OFPFlowMod(
 				datapath=datapath,
-				priority=15,
+				priority=20,
 				match=ofp_parser.OFPMatch(
 					in_port=in_port,
 					vlan_vid=(vlan_id | 0x1000),

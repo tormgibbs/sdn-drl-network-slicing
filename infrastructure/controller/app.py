@@ -146,3 +146,13 @@ class CampusController(app_manager.OSKenApp):
 		):
 			self.logger.info('s1-upf port added: port_no=%s', desc.port_no)
 			install_return_path_rules(datapath, desc.port_no)
+
+	@set_ev_cls(ofp_event.EventOFPErrorMsg, [CONFIG_DISPATCHER, MAIN_DISPATCHER])
+	def error_msg_handler(self, ev):
+		msg = ev.msg
+		dpid = msg.datapath.id
+		name = self.dpid_to_name.get(dpid, f'unknown({dpid})')
+		self.logger.error(
+			'OFPErrorMsg: dpid=%s name=%s type=0x%02x code=0x%02x data=%s',
+			dpid, name, msg.type, msg.code, msg.data,
+		)
