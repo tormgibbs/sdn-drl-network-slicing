@@ -6,7 +6,7 @@ import { useLocation } from "@tanstack/react-router";
 export default function AppSidebar({ ...props}: React.ComponentProps<typeof Sidebar>) {
     const location = useLocation();
     return (
-      <Sidebar className="dark bg-background text-foreground" { ...props}>
+      <Sidebar className="dark bg-background text-foreground" collapsible="offcanvas" { ...props}>
         <SidebarHeader>
           <div className="flex flex-col gap-2 leading-none">
             <p className="font-medium text-3xl">UMaT 5G SDN</p>

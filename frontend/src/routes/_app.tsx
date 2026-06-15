@@ -1,5 +1,5 @@
 import AppSidebar from '#/components/primitives/sidebar'
-import { SidebarInset, SidebarProvider } from '#/components/ui/sidebar'
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '#/components/ui/sidebar'
 import { createFileRoute, Outlet } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_app')({
@@ -9,10 +9,13 @@ export const Route = createFileRoute('/_app')({
 function RouteComponent() {
   return (
     <SidebarProvider>
-      <AppSidebar/>
+      <AppSidebar />
       <SidebarInset>
-        <Outlet/>
+        <header>
+          <SidebarTrigger className='text-foreground' /> 
+        </header>
+        <Outlet />
       </SidebarInset>
     </SidebarProvider>
-  )
+  );
 }
