@@ -60,6 +60,7 @@ class StatsCollector:
 		if self._topology is None:
 			with open(self._topology_config) as f:
 				self._topology = yaml.safe_load(f)
+		assert self._topology is not None
 		return self._topology
 
 	def _get_slices(self) -> dict:
