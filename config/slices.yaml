@@ -1,3 +1,5 @@
+slice_order: [vle, student_portal, admin, iot, general]
+
 slices:
   vle:
     vlan: 10
