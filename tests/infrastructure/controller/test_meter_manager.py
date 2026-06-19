@@ -32,6 +32,7 @@ SAMPLE_TOPOLOGY = {
 }
 
 SAMPLE_SLICES = {
+	'slice_order': ['vle', 'student_portal', 'admin', 'iot', 'general'],
 	'network': {'total_bandwidth_bps': 100_000_000},
 	'slices': {
 		'vle': {'vlan': 10, 'min_throughput_bps': 5_000_000},
@@ -41,6 +42,27 @@ SAMPLE_SLICES = {
 		'general': {'vlan': 50, 'min_throughput_bps': 5_000_000},
 	},
 }
+
+SKEWED_SLICES = {
+	'slice_order': ['vle', 'student_portal', 'admin', 'iot', 'general'],
+	'network': {'total_bandwidth_bps': 100_000_000},
+	'slices': {
+		'vle': {'vlan': 10, 'min_throughput_bps': 50_000_000},
+		'student_portal': {'vlan': 20, 'min_throughput_bps': 25_000_000},
+		'admin': {'vlan': 30, 'min_throughput_bps': 10_000_000},
+		'iot': {'vlan': 40, 'min_throughput_bps': 64_000},
+		'general': {'vlan': 50, 'min_throughput_bps': 5_000_000},
+	},
+}
+
+
+@pytest.fixture
+def manager_skewed_floors(tmp_path):
+	topology_path = tmp_path / 'topology.yaml'
+	slices_path = tmp_path / 'slices.yaml'
+	topology_path.write_text(yaml.dump(SAMPLE_TOPOLOGY))
+	slices_path.write_text(yaml.dump(SKEWED_SLICES))
+	return MeterManager(topology_config=topology_path, slices_config=slices_path)
 
 
 @pytest.fixture
@@ -104,7 +126,10 @@ class TestRegisterDatapath:
 			manager.register_datapath('s3', _make_datapath())
 			call_args = mock_install.call_args[0]
 			assert call_args[0] == 's3'
-			assert call_args[1] == manager._current_allocations
+			expected_rates = manager._compute_rates_kbps(
+				manager._current_allocations, manager._load_slices()
+			)
+			assert call_args[1] == expected_rates
 
 	def test_reconnect_uses_current_allocations_not_defaults(self, manager):
 		manager.register_datapath('s2', _make_datapath())
@@ -121,8 +146,9 @@ class TestRegisterDatapath:
 
 		with patch.object(manager, '_install_meters_for_switch') as mock_install:
 			manager.register_datapath('s3', _make_datapath())
-			_, called_allocations, *_ = mock_install.call_args[0]
-			assert called_allocations == custom
+			_, called_rates, *_ = mock_install.call_args[0]
+			expected_rates = manager._compute_rates_kbps(custom, manager._load_slices())
+			assert called_rates == expected_rates
 
 
 class TestInstallMeters:
@@ -160,25 +186,41 @@ class TestInstallMeters:
 			)
 		assert 'No registered datapath' in caplog.text
 
-	def test_rate_floored_at_min_throughput(self, manager):
-		dp = _make_datapath()
-		# min_throughput_bps is 5_000_000 = 5000 kbps
-		# Zero allocation would produce 0 bps, floor must clamp to 5_000_000
-		manager._replace_meter(dp, meter_id=1, rate_bps=max(0, 0))
-
-		# Directly verify floor behavior: rate_bps=0 -> clamped to min -> 5000 kbps
+	def test_rate_floored_at_min_throughput(self, manager_skewed_floors):
 		dp2 = _make_datapath()
-		manager._datapaths['s2'] = dp2
-		manager._datapaths['s3'] = _make_datapath()
-
-		manager.install_meters(
+		manager_skewed_floors._datapaths['s2'] = dp2
+		manager_skewed_floors._datapaths['s3'] = _make_datapath()
+		manager_skewed_floors.install_meters(
 			{'vle': 0.0, 'student_portal': 0.0, 'admin': 0.0, 'iot': 0.0, 'general': 0.0}
 		)
 
+		meter_mod_adds = [
+			c
+			for c in dp2.ofproto_parser.OFPMeterMod.call_args_list
+			if c.kwargs.get('command') == dp2.ofproto.OFPMC_ADD
+		]
 		band_calls = dp2.ofproto_parser.OFPMeterBandDrop.call_args_list
-		assert len(band_calls) > 0
-		for call in band_calls:
-			assert call.kwargs['rate'] >= 5000
+		assert len(meter_mod_adds) == len(band_calls) == 3
+
+		# meter_id -> slice on s2, per _METER_ID_BY_AP (ap1/ap2/ap3 -> 1/2/3).
+		# OFPMeterBandDrop calls don't carry meter_id themselves, so each
+		# band is matched to its ADD call by emission order -- a single
+		# function's internal call order, not topology/AP iteration order.
+		meter_id_to_slice = {1: 'vle', 2: 'student_portal', 3: 'admin'}
+		expected_kbps = {'vle': 51988, 'student_portal': 26987, 'admin': 11987}
+		expected_floor_kbps = {'vle': 50000, 'student_portal': 25000, 'admin': 10000}
+
+		for mm_call, band_call in zip(meter_mod_adds, band_calls):
+			slice_name = meter_id_to_slice[mm_call.kwargs['meter_id']]
+			actual = band_call.kwargs['rate']
+			assert actual == expected_kbps[slice_name], (
+				f'{slice_name}: got {actual}, expected {expected_kbps[slice_name]}'
+			)
+			assert actual >= expected_floor_kbps[slice_name], (
+				f'{slice_name}: got {actual} kbps, below its own floor of '
+				f'{expected_floor_kbps[slice_name]} kbps'
+			)
+
 
 	def test_meter_ids_are_datapath_scoped(self, manager):
 		dp_s2 = _make_datapath()
@@ -206,7 +248,7 @@ class TestInstallMeters:
 class TestReplaceMeter:
 	def test_delete_sent_before_add(self, manager):
 		dp = _make_datapath()
-		manager._replace_meter(dp, meter_id=1, rate_bps=10_000_000)
+		manager._replace_meter(dp, meter_id=1, rate_kbps=10_000)
 
 		delete_call = dp.ofproto_parser.OFPMeterMod.call_args_list[0]
 		add_call = dp.ofproto_parser.OFPMeterMod.call_args_list[1]
@@ -214,16 +256,16 @@ class TestReplaceMeter:
 		assert delete_call.kwargs['command'] == dp.ofproto.OFPMC_DELETE
 		assert add_call.kwargs['command'] == dp.ofproto.OFPMC_ADD
 
-	def test_rate_converted_to_kbps(self, manager):
+	def test_rate_passed_through_unconverted(self, manager):
 		dp = _make_datapath()
-		manager._replace_meter(dp, meter_id=1, rate_bps=50_000_000)
+		manager._replace_meter(dp, meter_id=1, rate_kbps=50_000)
 
 		band_call = dp.ofproto_parser.OFPMeterBandDrop.call_args_list[0]
 		assert band_call.kwargs['rate'] == 50_000
 
 	def test_rate_floored_at_one_kbps(self, manager):
 		dp = _make_datapath()
-		manager._replace_meter(dp, meter_id=1, rate_bps=0)
+		manager._replace_meter(dp, meter_id=1, rate_kbps=0)
 
 		band_call = dp.ofproto_parser.OFPMeterBandDrop.call_args_list[0]
 		assert band_call.kwargs['rate'] == 1
