@@ -1,4 +1,4 @@
-.PHONY: topology clean-topology core-up core-down core-status controller module-load test ue-attach ue-status network-setup ue-setup up down traffic-start traffic-stop
+.PHONY: topology clean-topology core-up core-down core-status controller module-load test ue-attach ue-status network-setup ue-setup up down traffic-start traffic-stop ue-detach smf-restart
 
 topology:
 	sudo python3 infrastructure/topology/campus_topology.py
@@ -37,8 +37,40 @@ ue-attach:
 	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue4.yaml
 	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue5.yaml
 
+ue-detach:
+	docker exec ueransim /ueransim/nr-cli imsi-208930000000001 --exec "deregister switch-off" 2>/dev/null || true
+	docker exec ueransim /ueransim/nr-cli imsi-208930000000002 --exec "deregister switch-off" 2>/dev/null || true
+	docker exec ueransim /ueransim/nr-cli imsi-208930000000003 --exec "deregister switch-off" 2>/dev/null || true
+	docker exec ueransim /ueransim/nr-cli imsi-208930000000004 --exec "deregister switch-off" 2>/dev/null || true
+	docker exec ueransim /ueransim/nr-cli imsi-208930000000005 --exec "deregister switch-off" 2>/dev/null || true
+	@echo "Waiting for UEs to deregister..."
+	@i=0; until [ "$$(docker exec ueransim /ueransim/nr-cli --dump 2>/dev/null | grep -c '^imsi-')" -eq 0 ]; do \
+		i=$$((i+1)); [ $$i -ge 15 ] && echo "WARNING: not all UEs deregistered after 15s, proceeding" && break; \
+		sleep 1; \
+	done
+	docker exec ueransim pkill -f nr-ue 2>/dev/null || true
+
 ue-status:
 	docker exec ueransim ps aux | grep nr-ue
+
+smf-restart:
+	make ue-detach
+	docker restart upf
+	@echo "Waiting for UPF PFCP listener..."
+	@i=0; until docker exec upf ss -lnup 2>/dev/null | grep -q ':8805'; do \
+		i=$$((i+1)); [ $$i -ge 30 ] && echo "ERROR: UPF did not become ready after 30s" && exit 1; \
+		sleep 1; \
+	done
+	@SMF_TS=$$(date +%s); \
+	docker restart smf; \
+	echo "Waiting for SMF-UPF PFCP association..."; \
+	i=0; until docker logs smf --since $$SMF_TS 2>&1 | grep -q "setup association"; do \
+		i=$$((i+1)); [ $$i -ge 60 ] && echo "ERROR: SMF association not established after 60s" && exit 1; \
+		sleep 1; \
+	done; \
+	echo "SMF-UPF association established."
+	make ue-attach
+	make ue-setup
 
 test:
 	uv run pytest tests/ -v
@@ -68,7 +100,7 @@ up: core-up module-load
 	@echo "  5. make ue-setup          (Terminal 2)"
 
 down:
-	-docker exec ueransim pkill -f nr-ue 2>/dev/null || true
+	-make ue-detach
 	make clean-topology
 	make core-down
 

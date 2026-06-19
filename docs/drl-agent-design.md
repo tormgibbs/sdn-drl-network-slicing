@@ -165,20 +165,16 @@ PPO is selected because the campus network traffic conditions are dynamic and ch
 4. Compute reward
 5. Return (observation, reward, terminated, truncated, info)
 
-**reset() flow:** reconnect to WebSocket, return initial observation
+**reset() flow:**
+1. Reset meters at s2/s3 to baseline allocation (20 Mbps/slice equal split — same static allocation used as the comparison baseline in "Baselines for Comparison") via OFPMeterMod
+2. Query meter state via OFPMeterConfigStatsRequest to confirm the reset applied before proceeding
+3. Confirm all 5 UE PDU sessions are attached (uesimtun0_<n> interfaces present on host); for any not attached, re-trigger UERANSIM registration and wait for the tunnel interface to appear
+4. Reconnect to WebSocket
+5. Block until next stats push, build and return initial observation, info={}
 
 **Episode termination:** fixed number of steps (100 steps ≈ 8 minutes)
 
 ---
-
-## Key Implementation Constraints
-
-- `step()` blocks on WebSocket, not polling `/metrics` — ensures observation is always fresh
-- Softmax applied inside the Gymnasium environment before sending to `/allocate`, not by the controller
-- All state metrics normalised before neural network input
-- HTB floors protect against complete starvation — agent operates above floors
-- Agent controls meter ceilings only, not HTB floors
-
 
 ## Key Implementation Constraints
 

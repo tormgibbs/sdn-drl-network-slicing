@@ -30,7 +30,6 @@ from infrastructure.controller.flow_manager import (
 	set_dpid_map,
 )
 from infrastructure.controller.meter_manager import MeterManager
-from infrastructure.controller.queue_manager import create_htb_queue
 from infrastructure.controller.rest_api import registry, start_api_server
 from infrastructure.controller.stats_collector import StatsCollector
 
@@ -97,7 +96,6 @@ class CampusController(app_manager.OSKenApp):
 				self.logger.error('No VLAN configured for AP %s', ap_name)
 				return
 			install_ap_rules(datapath, ap_name, vlan_id)
-			create_htb_queue(ap_name)
 		else:
 			self.logger.warning('Unknown switch: dpid=%s', dpid)
 			install_table_miss(datapath)
@@ -111,8 +109,8 @@ class CampusController(app_manager.OSKenApp):
 			self.stats_collector.handle_port_stats_reply(name, ev.msg.body)
 
 	@set_ev_cls(
-			ofp_event.EventOFPPortDescStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
-		)
+		ofp_event.EventOFPPortDescStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
+	)
 	def port_desc_reply_handler(self, ev):
 		datapath = ev.msg.datapath
 		if not is_core(datapath.id):
@@ -154,5 +152,9 @@ class CampusController(app_manager.OSKenApp):
 		name = self.dpid_to_name.get(dpid, f'unknown({dpid})')
 		self.logger.error(
 			'OFPErrorMsg: dpid=%s name=%s type=0x%02x code=0x%02x data=%s',
-			dpid, name, msg.type, msg.code, msg.data,
+			dpid,
+			name,
+			msg.type,
+			msg.code,
+			msg.data,
 		)
