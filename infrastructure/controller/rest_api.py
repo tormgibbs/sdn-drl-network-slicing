@@ -162,8 +162,10 @@ def allocate(allocations: dict[str, float]):
 			detail=f'Allocations must sum to 1.0, got {total:.4f}',
 		)
 
-	mm.install_meters(allocations)
-	return {'status': 'ok', 'allocations': allocations}
+	rates_kbps = mm.install_meters(allocations)
+
+	return {'status': 'ok', 'rates_kbps': rates_kbps}
+
 
 
 def start_api_server(host: str = '0.0.0.0', port: int = 8080) -> None:

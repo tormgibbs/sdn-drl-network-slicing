@@ -35,6 +35,7 @@ def _make_stats_collector(stats: dict):
 def _make_meter_manager(slice_names: frozenset):
 	mm = MagicMock()
 	mm.slice_names = slice_names
+	mm.install_meters.return_value = {name: 1000 for name in slice_names}
 	return mm
 
 
@@ -198,6 +199,16 @@ class TestAllocate:
 		alloc = {k: 0.0 for k in SLICE_NAMES}
 		resp = client.post('/allocate', json=alloc)
 		assert resp.status_code == 422
+
+	def test_valid_allocation_returns_rates_kbps(self):
+		mm = _make_meter_manager(SLICE_NAMES)
+		mm.install_meters.return_value = {'vle': 51988, 'student_portal': 26987}
+		registry.register(_make_stats_collector({}), mm)
+		resp = client.post('/allocate', json=self.VALID_ALLOC)
+		assert resp.json() == {
+			'status': 'ok',
+			'rates_kbps': {'vle': 51988, 'student_portal': 26987},
+		}
 
 
 class TestRegistryDefaults:

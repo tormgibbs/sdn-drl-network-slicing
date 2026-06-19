@@ -96,7 +96,7 @@ class MeterManager:
 		equal_share = 1.0 / len(slice_order)
 		self.install_meters({name: equal_share for name in slice_order})
 
-	def install_meters(self, allocations: dict[str, float]) -> None:
+	def install_meters(self, allocations: dict[str, float]) -> dict[str, int]:
 		"""
 		Install or replace OpenFlow meters on all aggregation switches.
 
@@ -105,6 +105,11 @@ class MeterManager:
 		onto the floor-constrained simplex via project_allocation() and installs
 		the resulting kbps rates -- floor enforcement happens exactly once,
 		here, not in _install_meters_for_switch.
+
+		Returns the actual installed rates in kbps, keyed by slice name. This
+		is the single source of truth for what was installed -- callers (e.g.
+		the REST API) should return this to the agent rather than letting it
+		re-derive the projection independently.
 		"""
 		self._current_allocations = dict(allocations)
 		topology = self._load_topology()
@@ -115,6 +120,8 @@ class MeterManager:
 
 		for switch_name in aggregation_ports:
 			self._install_meters_for_switch(switch_name, rates_kbps, topology, slices)
+
+		return rates_kbps
 
 	def _install_meters_for_switch(
 		self,
