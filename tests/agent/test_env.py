@@ -2,8 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+import httpx2 as httpx
 import numpy as np
 import pytest
+import websockets
 
 from agent.env import EQUAL_SPLIT, CampusSlicingEnv
 
@@ -303,6 +305,80 @@ class TestReset:
 			assert env._step_count == 0
 
 
+class TestResetFailureHandling:
+	def test_apply_allocation_failure_raises_runtime_error(self, env):
+		with patch.object(env, '_apply_allocation', side_effect=httpx.HTTPError('boom')):
+			with pytest.raises(RuntimeError, match='reset\\(\\) failed to start episode'):
+				env.reset()
+
+	def test_connect_ws_failure_raises_runtime_error(self, env):
+		with (
+			patch.object(
+				env,
+				'_apply_allocation',
+				return_value={
+					'vle': 20000,
+					'student_portal': 20000,
+					'admin': 20000,
+					'iot': 20000,
+					'general': 20000,
+				},
+			),
+			patch.object(env, '_connect_ws', side_effect=OSError('connection refused')),
+		):
+			with pytest.raises(RuntimeError, match='reset\\(\\) failed to start episode'):
+				env.reset()
+
+	def test_wait_for_stats_failure_raises_runtime_error(self, env):
+		with (
+			patch.object(
+				env,
+				'_apply_allocation',
+				return_value={
+					'vle': 20000,
+					'student_portal': 20000,
+					'admin': 20000,
+					'iot': 20000,
+					'general': 20000,
+				},
+			),
+			patch.object(env, '_connect_ws'),
+			patch.object(
+				env, '_wait_for_stats', side_effect=websockets.ConnectionClosed(None, None)
+			),
+		):
+			with pytest.raises(RuntimeError, match='reset\\(\\) failed to start episode'):
+				env.reset()
+
+	def test_validate_metrics_failure_raises_runtime_error(self, env):
+		bad_metrics = _good_metrics()
+		bad_metrics['vle']['latency_ms'] = None
+		with (
+			patch.object(
+				env,
+				'_apply_allocation',
+				return_value={
+					'vle': 20000,
+					'student_portal': 20000,
+					'admin': 20000,
+					'iot': 20000,
+					'general': 20000,
+				},
+			),
+			patch.object(env, '_connect_ws'),
+			patch.object(env, '_wait_for_stats', return_value=bad_metrics),
+		):
+			with pytest.raises(RuntimeError, match='reset\\(\\) failed to start episode'):
+				env.reset()
+
+	def test_original_exception_preserved_as_cause(self, env):
+		original = httpx.HTTPError('boom')
+		with patch.object(env, '_apply_allocation', side_effect=original):
+			with pytest.raises(RuntimeError) as exc_info:
+				env.reset()
+			assert exc_info.value.__cause__ is original
+
+
 class TestStep:
 	def test_terminates_after_episode_length(self, env):
 		env.episode_length = 1
@@ -343,3 +419,77 @@ class TestStep:
 			obs, reward, terminated, truncated, info = env.step(np.zeros(5))
 			assert obs.shape == (15,)
 			assert isinstance(reward, float)
+
+
+class TestStepFailureHandling:
+	def test_http_error_returns_truncated(self, env):
+		env._last_obs = np.zeros(15, dtype=np.float32)
+		with patch.object(env, '_apply_allocation', side_effect=httpx.HTTPError('boom')):
+			obs, reward, terminated, truncated, info = env.step(np.zeros(5))
+			assert truncated is True
+			assert terminated is False
+			assert reward == 0.0
+			assert 'failure' in info
+
+	def test_http_error_returns_last_obs(self, env):
+		fallback = np.full(15, 0.42, dtype=np.float32)
+		env._last_obs = fallback
+		with patch.object(env, '_apply_allocation', side_effect=httpx.HTTPError('boom')):
+			obs, *_ = env.step(np.zeros(5))
+			assert np.array_equal(obs, fallback)
+
+	def test_websocket_exception_returns_truncated(self, env):
+		env._last_obs = np.zeros(15, dtype=np.float32)
+		with (
+			patch.object(
+				env,
+				'_apply_allocation',
+				return_value={
+					'vle': 20000,
+					'student_portal': 20000,
+					'admin': 20000,
+					'iot': 20000,
+					'general': 20000,
+				},
+			),
+			patch.object(
+				env, '_wait_for_stats', side_effect=websockets.ConnectionClosed(None, None)
+			),
+		):
+			obs, reward, terminated, truncated, info = env.step(np.zeros(5))
+			assert truncated is True
+			assert reward == 0.0
+
+	def test_validate_metrics_failure_returns_truncated(self, env):
+		env._last_obs = np.zeros(15, dtype=np.float32)
+		bad_metrics = _good_metrics()
+		bad_metrics['vle']['latency_ms'] = None
+		with (
+			patch.object(
+				env,
+				'_apply_allocation',
+				return_value={
+					'vle': 20000,
+					'student_portal': 20000,
+					'admin': 20000,
+					'iot': 20000,
+					'general': 20000,
+				},
+			),
+			patch.object(env, '_wait_for_stats', return_value=bad_metrics),
+		):
+			obs, reward, terminated, truncated, info = env.step(np.zeros(5))
+			assert truncated is True
+
+	def test_step_count_increments_on_failure(self, env):
+		env._last_obs = np.zeros(15, dtype=np.float32)
+		env._step_count = 5
+		with patch.object(env, '_apply_allocation', side_effect=httpx.HTTPError('boom')):
+			env.step(np.zeros(5))
+			assert env._step_count == 6
+
+	def test_raises_if_no_fallback_obs_available(self, env):
+		env._last_obs = None
+		with patch.object(env, '_apply_allocation', side_effect=httpx.HTTPError('boom')):
+			with pytest.raises(AssertionError, match='no fallback obs available'):
+				env.step(np.zeros(5))

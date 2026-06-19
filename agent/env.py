@@ -6,6 +6,7 @@ import json
 import gymnasium as gym
 import httpx2 as httpx
 import numpy as np
+import websockets
 from gymnasium import spaces
 from websockets.sync.client import connect as ws_connect
 
@@ -47,6 +48,7 @@ class CampusSlicingEnv(gym.Env):
 
 		self._http = httpx.Client(base_url=API_BASE_URL)
 		self._ws = None
+		self._last_obs: np.ndarray | None = None
 
 	def _softmax(self, logits: np.ndarray) -> list[float]:
 		z = logits - np.max(logits)
@@ -147,22 +149,41 @@ class CampusSlicingEnv(gym.Env):
 		super().reset(seed=seed)
 		self._step_count = 0
 
-		self._current_rates_kbps = self._apply_allocation(EQUAL_SPLIT)
-		self._connect_ws()
+		try:
+			self._current_rates_kbps = self._apply_allocation(EQUAL_SPLIT)
+			self._connect_ws()
+			metrics = self._wait_for_stats()
+			self._validate_metrics(metrics)
+		except (
+			httpx.HTTPError,
+			OSError,
+			websockets.WebSocketException,
+			AssertionError,
+		) as exc:
+			raise RuntimeError(f'reset() failed to start episode: {exc}') from exc
 
-		metrics = self._wait_for_stats()
-		self._validate_metrics(metrics)
 		obs = self._build_observation(metrics)
+		self._last_obs = obs
 		return obs, {}
 
 	def step(self, action: np.ndarray):
 		p = self._softmax(action)
-		self._current_rates_kbps = self._apply_allocation(p)
 
-		metrics = self._wait_for_stats()
-		self._validate_metrics(metrics)
+		try:
+			self._current_rates_kbps = self._apply_allocation(p)
+			metrics = self._wait_for_stats()
+			self._validate_metrics(metrics)
+		except (httpx.HTTPError, OSError, websockets.WebSocketException, AssertionError) as exc:
+			assert self._last_obs is not None, (
+				'infra failure on the very first step() call, before any '
+				'successful observation -- no fallback obs available'
+			)
+			self._step_count += 1
+			return self._last_obs, 0.0, False, True, {'failure': str(exc)}
+
 		obs = self._build_observation(metrics)
 		reward = self._compute_reward(metrics)
+		self._last_obs = obs
 
 		self._step_count += 1
 		terminated = self._step_count >= self.episode_length
