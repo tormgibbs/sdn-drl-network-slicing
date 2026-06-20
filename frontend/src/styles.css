@@ -166,7 +166,7 @@ body,
 #app {
   min-height: 100%;
 }
-
+/* 
 body {
   margin: 0;
   color: var(--sea-ink);
@@ -348,4 +348,4 @@ a {
     background-color: var(--background);
     color: var(--foreground);
   }
-}
+} */
