@@ -1,5 +1,6 @@
 # tests/agent/test_env.py
 
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import httpx2 as httpx
@@ -18,33 +19,68 @@ SLICES_CONFIG = {
 			'max_latency_ms': 100,
 			'max_loss_pct': 0.5,
 			'priority': 5,
+			'probe_interface': 'ue1tun0',
 		},
 		'student_portal': {
 			'min_throughput_bps': 25_000_000,
 			'max_latency_ms': 50,
 			'max_loss_pct': 0.1,
 			'priority': 4,
+			'probe_interface': 'ue2tun0',
 		},
 		'admin': {
 			'min_throughput_bps': 10_000_000,
 			'max_latency_ms': 150,
 			'max_loss_pct': 1.0,
 			'priority': 3,
+			'probe_interface': 'ue3tun0',
 		},
 		'iot': {
 			'min_throughput_bps': 64_000,
 			'max_latency_ms': 200,
 			'max_loss_pct': 5.0,
 			'priority': 2,
+			'probe_interface': 'ue4tun0',
 		},
 		'general': {
 			'min_throughput_bps': 5_000_000,
 			'max_latency_ms': 500,
 			'max_loss_pct': 10.0,
 			'priority': 1,
+			'probe_interface': 'ue5tun0',
 		},
 	},
 }
+
+UE_PROFILES = {
+	'ue_profiles': {
+		'ue1': {'slice': 'vle', 'config_file': 'uecfg-ue1.yaml'},
+		'ue2': {'slice': 'student_portal', 'config_file': 'uecfg-ue2.yaml'},
+		'ue3': {'slice': 'admin', 'config_file': 'uecfg-ue3.yaml'},
+		'ue4': {'slice': 'iot', 'config_file': 'uecfg-ue4.yaml'},
+		'ue5': {'slice': 'general', 'config_file': 'uecfg-ue5.yaml'},
+	},
+}
+
+
+@pytest.fixture
+def env_with_ue_profiles():
+	e = CampusSlicingEnv(SLICES_CONFIG, ue_profiles=UE_PROFILES)
+	e._current_rates_kbps = dict(
+		zip(SLICES_CONFIG['slice_order'], [51988, 26987, 11987, 2051, 6987])
+	)
+	yield e
+	e.close()
+
+
+@pytest.fixture
+def env():
+	e = CampusSlicingEnv(SLICES_CONFIG)
+	e._current_rates_kbps = dict(
+		zip(SLICES_CONFIG['slice_order'], [51988, 26987, 11987, 2051, 6987])
+	)
+	yield e
+	e.close()
 
 
 def _good_metrics() -> dict[str, dict[str, float | None]]:
@@ -59,16 +95,6 @@ def _good_metrics() -> dict[str, dict[str, float | None]]:
 		'iot': {'latency_ms': 80.0, 'loss_pct': 1.0, 'tx_throughput_bps': 60_000.0},
 		'general': {'latency_ms': 200.0, 'loss_pct': 2.0, 'tx_throughput_bps': 4_000_000.0},
 	}
-
-
-@pytest.fixture
-def env():
-	e = CampusSlicingEnv(SLICES_CONFIG)
-	e._current_rates_kbps = dict(
-		zip(SLICES_CONFIG['slice_order'], [51988, 26987, 11987, 2051, 6987])
-	)
-	yield e
-	e.close()
 
 
 class TestInit:
@@ -250,6 +276,7 @@ class TestClose:
 class TestReset:
 	def test_calls_apply_allocation_with_equal_split(self, env):
 		with (
+			patch.object(env, '_check_tunnel_interfaces', return_value=[]),
 			patch.object(env, '_apply_allocation') as mock_apply,
 			patch.object(env, '_connect_ws'),
 			patch.object(env, '_wait_for_stats', return_value=_good_metrics()),
@@ -266,6 +293,7 @@ class TestReset:
 
 	def test_returns_observation_and_empty_info(self, env):
 		with (
+			patch.object(env, '_check_tunnel_interfaces', return_value=[]),
 			patch.object(
 				env,
 				'_apply_allocation',
@@ -287,6 +315,7 @@ class TestReset:
 	def test_resets_step_count(self, env):
 		env._step_count = 42
 		with (
+			patch.object(env, '_check_tunnel_interfaces', return_value=[]),
 			patch.object(
 				env,
 				'_apply_allocation',
@@ -307,12 +336,16 @@ class TestReset:
 
 class TestResetFailureHandling:
 	def test_apply_allocation_failure_raises_runtime_error(self, env):
-		with patch.object(env, '_apply_allocation', side_effect=httpx.HTTPError('boom')):
+		with (
+			patch.object(env, '_check_tunnel_interfaces', return_value=[]),
+			patch.object(env, '_apply_allocation', side_effect=httpx.HTTPError('boom')),
+		):
 			with pytest.raises(RuntimeError, match='reset\\(\\) failed to start episode'):
 				env.reset()
 
 	def test_connect_ws_failure_raises_runtime_error(self, env):
 		with (
+			patch.object(env, '_check_tunnel_interfaces', return_value=[]),
 			patch.object(
 				env,
 				'_apply_allocation',
@@ -331,6 +364,7 @@ class TestResetFailureHandling:
 
 	def test_wait_for_stats_failure_raises_runtime_error(self, env):
 		with (
+			patch.object(env, '_check_tunnel_interfaces', return_value=[]),
 			patch.object(
 				env,
 				'_apply_allocation',
@@ -354,6 +388,7 @@ class TestResetFailureHandling:
 		bad_metrics = _good_metrics()
 		bad_metrics['vle']['latency_ms'] = None
 		with (
+			patch.object(env, '_check_tunnel_interfaces', return_value=[]),
 			patch.object(
 				env,
 				'_apply_allocation',
@@ -373,7 +408,10 @@ class TestResetFailureHandling:
 
 	def test_original_exception_preserved_as_cause(self, env):
 		original = httpx.HTTPError('boom')
-		with patch.object(env, '_apply_allocation', side_effect=original):
+		with (
+			patch.object(env, '_check_tunnel_interfaces', return_value=[]),
+			patch.object(env, '_apply_allocation', side_effect=original),
+		):
 			with pytest.raises(RuntimeError) as exc_info:
 				env.reset()
 			assert exc_info.value.__cause__ is original
@@ -493,3 +531,136 @@ class TestStepFailureHandling:
 		with patch.object(env, '_apply_allocation', side_effect=httpx.HTTPError('boom')):
 			with pytest.raises(AssertionError, match='no fallback obs available'):
 				env.step(np.zeros(5))
+
+
+class TestTunnelRecovery:
+	def test_no_missing_interfaces_skips_recovery(self, env_with_ue_profiles):
+		all_ok = MagicMock(returncode=0)
+		with patch('agent.env.subprocess.run', return_value=all_ok) as mock_run:
+			result = env_with_ue_profiles._check_tunnel_interfaces()
+			assert result == []
+			assert mock_run.call_count == 5
+
+	def test_missing_interface_detected(self, env_with_ue_profiles):
+		def fake_run(cmd, **kwargs):
+			iface = cmd[6]  # ['docker', 'exec', 'ueransim', 'ip', 'link', 'show', <iface>]
+			m = MagicMock()
+			m.returncode = 1 if iface == 'ue3tun0' else 0
+			return m
+
+		with patch('agent.env.subprocess.run', side_effect=fake_run):
+			missing = env_with_ue_profiles._check_tunnel_interfaces()
+			assert missing == ['admin']
+
+	def test_recovery_triggers_registration_for_missing_slices(
+		self, env_with_ue_profiles
+	):
+		with patch('agent.env.subprocess.run') as mock_run, patch('agent.env.time.sleep'):
+			mock_run.return_value = MagicMock(returncode=0)
+			env_with_ue_profiles._recover_tunnel_interfaces(['admin', 'iot'])
+
+			registration_calls = [
+				c for c in mock_run.call_args_list if '/ueransim/nr-ue' in c.args[0]
+			]
+			assert len(registration_calls) == 2
+
+			configs_triggered = [c.args[0][-1] for c in registration_calls]
+			assert '/ueransim/config/uecfg-ue3.yaml' in configs_triggered
+			assert '/ueransim/config/uecfg-ue4.yaml' in configs_triggered
+
+	def test_recovery_waits_for_interface_to_appear(self, env_with_ue_profiles):
+		call_count = 0
+
+		def fake_run(cmd, **kwargs):
+			nonlocal call_count
+			m = MagicMock()
+			if 'ip' in cmd and 'link' in cmd:
+				call_count += 1
+				m.returncode = 0 if call_count >= 3 else 1
+			else:
+				m.returncode = 0
+			return m
+
+		with (
+			patch('agent.env.subprocess.run', side_effect=fake_run),
+			patch('agent.env.time.sleep'),
+		):
+			env_with_ue_profiles._recover_tunnel_interfaces(['vle'])
+
+	def test_recovery_raises_after_timeout(self, env_with_ue_profiles):
+		def fake_run(cmd, **kwargs):
+			m = MagicMock()
+			if 'ip' in cmd and 'link' in cmd:
+				m.returncode = 1
+			else:
+				m.returncode = 0
+			return m
+
+		with (
+			patch('agent.env.subprocess.run', side_effect=fake_run),
+			patch('agent.env.time.sleep'),
+		):
+			with pytest.raises(RuntimeError, match='did not appear after 30s'):
+				env_with_ue_profiles._recover_tunnel_interfaces(['vle'])
+
+	def test_recovery_raises_if_no_ue_config_mapped(self, env):
+		with pytest.raises(AssertionError, match='ue_profiles was not provided'):
+			env._recover_tunnel_interfaces(['vle'])
+
+	def test_reset_calls_tunnel_check(self, env_with_ue_profiles):
+		with (
+			patch.object(
+				env_with_ue_profiles, '_check_tunnel_interfaces', return_value=[]
+			) as mock_check,
+			patch.object(
+				env_with_ue_profiles,
+				'_apply_allocation',
+				return_value={
+					'vle': 20000,
+					'student_portal': 20000,
+					'admin': 20000,
+					'iot': 20000,
+					'general': 20000,
+				},
+			),
+			patch.object(env_with_ue_profiles, '_connect_ws'),
+			patch.object(
+				env_with_ue_profiles, '_wait_for_stats', return_value=_good_metrics()
+			),
+		):
+			env_with_ue_profiles.reset()
+			mock_check.assert_called_once()
+
+	def test_reset_triggers_recovery_when_interfaces_missing(self, env_with_ue_profiles):
+		with (
+			patch.object(
+				env_with_ue_profiles, '_check_tunnel_interfaces', return_value=['admin']
+			),
+			patch.object(env_with_ue_profiles, '_recover_tunnel_interfaces') as mock_recover,
+			patch.object(
+				env_with_ue_profiles,
+				'_apply_allocation',
+				return_value={
+					'vle': 20000,
+					'student_portal': 20000,
+					'admin': 20000,
+					'iot': 20000,
+					'general': 20000,
+				},
+			),
+			patch.object(env_with_ue_profiles, '_connect_ws'),
+			patch.object(
+				env_with_ue_profiles, '_wait_for_stats', return_value=_good_metrics()
+			),
+		):
+			env_with_ue_profiles.reset()
+			mock_recover.assert_called_once_with(['admin'])
+
+	def test_subprocess_timeout_caught_by_reset(self, env_with_ue_profiles):
+		with patch.object(
+			env_with_ue_profiles,
+			'_check_tunnel_interfaces',
+			side_effect=subprocess.TimeoutExpired(cmd='docker', timeout=5),
+		):
+			with pytest.raises(RuntimeError, match='reset\\(\\) failed to start episode'):
+				env_with_ue_profiles.reset()

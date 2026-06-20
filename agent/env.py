@@ -2,6 +2,9 @@
 
 
 import json
+import logging
+import subprocess
+import time
 
 import gymnasium as gym
 import httpx2 as httpx
@@ -16,18 +19,32 @@ from agent.slice_conversion import action_array_to_slice_dict
 API_BASE_URL = 'http://localhost:8080'
 WS_URL = 'ws://localhost:8080/ws/metrics'
 
+# Default policy input for reset(): uniform fractions across all 5 slices.
 EQUAL_SPLIT = [0.2, 0.2, 0.2, 0.2, 0.2]
 
+# Reward function weights (see drl-agent-design.md Reward Function section).
 W1, W2, W3, W4, W5 = 0.35, 0.25, 0.20, 0.10, 0.10
+
+logger = logging.getLogger(__name__)
 
 
 class CampusSlicingEnv(gym.Env):
-	def __init__(self, slices_config: dict, episode_length: int = 100):
+	def __init__(
+		self,
+		slices_config: dict,
+		ue_profiles: dict | None = None,
+		episode_length: int = 100,
+	):
 		super().__init__()
 
 		self.slice_order: list[str] = slices_config['slice_order']
 		self.slices_cfg: dict = slices_config['slices']
 		self.n_slices = len(self.slice_order)
+
+		self._slice_to_ue_config: dict[str, str] = {}
+		if ue_profiles is not None:
+			for ue in ue_profiles['ue_profiles'].values():
+				self._slice_to_ue_config[ue['slice']] = ue['config_file']
 
 		self.floors_kbps = [
 			self.slices_cfg[name]['min_throughput_bps'] // 1000 for name in self.slice_order
@@ -81,6 +98,65 @@ class CampusSlicingEnv(gym.Env):
 			m = metrics[name]
 			assert m['latency_ms'] is not None, f'latency_ms is None for slice {name!r}'
 			assert m['loss_pct'] is not None, f'loss_pct is None for slice {name!r}'
+
+	def _check_tunnel_interfaces(self) -> list[str]:
+		missing = []
+		for name in self.slice_order:
+			iface = self.slices_cfg[name]['probe_interface']
+			result = subprocess.run(
+				['docker', 'exec', 'ueransim', 'ip', 'link', 'show', iface],
+				capture_output=True,
+				timeout=5,
+			)
+			if result.returncode != 0:
+				missing.append(name)
+		return missing
+
+	def _recover_tunnel_interfaces(self, missing: list[str]) -> None:
+		for name in missing:
+			iface = self.slices_cfg[name]['probe_interface']
+			config_file = self._slice_to_ue_config.get(name)
+			assert config_file is not None, (
+				f'no UE config file mapped for slice {name!r} -- '
+				'ue_profiles was not provided or is missing this slice'
+			)
+
+			logger.warning(
+				'Tunnel interface missing for slice %s (%s) -- '
+				're-triggering UERANSIM registration',
+				name,
+				iface,
+			)
+
+			subprocess.run(
+				[
+					'docker',
+					'exec',
+					'-d',
+					'ueransim',
+					'/ueransim/nr-ue',
+					'-c',
+					f'/ueransim/config/{config_file}',
+				],
+				capture_output=True,
+				timeout=10,
+			)
+
+		for name in missing:
+			iface = self.slices_cfg[name]['probe_interface']
+			for _ in range(30):
+				result = subprocess.run(
+					['docker', 'exec', 'ueransim', 'ip', 'link', 'show', iface],
+					capture_output=True,
+					timeout=5,
+				)
+				if result.returncode == 0:
+					break
+				time.sleep(1)
+			else:
+				raise RuntimeError(
+					f'tunnel interface {iface} for slice {name!r} did not appear after 30s'
+				)
 
 	def _build_observation(self, metrics: dict) -> np.ndarray:
 		assert self._current_rates_kbps is not None, (
@@ -150,6 +226,10 @@ class CampusSlicingEnv(gym.Env):
 		self._step_count = 0
 
 		try:
+			missing = self._check_tunnel_interfaces()
+			if missing:
+				self._recover_tunnel_interfaces(missing)
+
 			self._current_rates_kbps = self._apply_allocation(EQUAL_SPLIT)
 			self._connect_ws()
 			metrics = self._wait_for_stats()
@@ -159,6 +239,7 @@ class CampusSlicingEnv(gym.Env):
 			OSError,
 			websockets.WebSocketException,
 			AssertionError,
+			subprocess.SubprocessError,
 		) as exc:
 			raise RuntimeError(f'reset() failed to start episode: {exc}') from exc
 
@@ -173,7 +254,12 @@ class CampusSlicingEnv(gym.Env):
 			self._current_rates_kbps = self._apply_allocation(p)
 			metrics = self._wait_for_stats()
 			self._validate_metrics(metrics)
-		except (httpx.HTTPError, OSError, websockets.WebSocketException, AssertionError) as exc:
+		except (
+			httpx.HTTPError,
+			OSError,
+			websockets.WebSocketException,
+			AssertionError,
+		) as exc:
 			assert self._last_obs is not None, (
 				'infra failure on the very first step() call, before any '
 				'successful observation -- no fallback obs available'
