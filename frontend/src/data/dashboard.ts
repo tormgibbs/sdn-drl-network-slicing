@@ -1,0 +1,334 @@
+import type { Metric, SliceConfig } from "#/types/slice";
+import type { WSMessage, Mode, Scenario } from "#/types/slice";
+
+export const initialData = {
+  slices: {
+    vle: {
+      name: "VLE",
+      priority: 5,
+      priority_label: "PR5",
+      max_latency_ms: 100,
+      max_loss_pct: 0.5,
+      min_throughput_bps: 50000000,
+    },
+    student_portal: {
+      name: "Student Portal",
+      priority: 4,
+      priority_label: "PR4",
+      max_latency_ms: 50,
+      max_loss_pct: 0.1,
+      min_throughput_bps: 25000000,
+    },
+    admin: {
+      name: "Admin",
+      priority: 3,
+      priority_label: "PR3",
+      max_latency_ms: 150,
+      max_loss_pct: 1.0,
+      min_throughput_bps: 10000000,
+    },
+    iot: {
+      name: "IoT",
+      priority: 2,
+      priority_label: "PR2",
+      max_latency_ms: 200,
+      max_loss_pct: 5.0,
+      min_throughput_bps: 64000,
+    },
+    general: {
+      name: "General",
+      priority: 1,
+      priority_label: "PR1",
+      max_latency_ms: 500,
+      max_loss_pct: 10.0,
+      min_throughput_bps: 5000000,
+    },
+  },
+};
+
+// Simulates what the WebSocket pushes every 5 seconds
+export const dynamicStates: Record<string, WSMessage> = {
+  agent_normal: {
+    timestamp: "",
+    allocations: {
+      vle: 50000000,
+      student_portal: 25000000,
+      admin: 10000000,
+      iot: 10000000,
+      general: 5000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 55000000, latency_ms: 1.2, loss_pct: 0.0 },
+      student_portal: {
+        tx_throughput_bps: 26000000,
+        latency_ms: 0.8,
+        loss_pct: 0.0,
+      },
+      admin: { tx_throughput_bps: 11000000, latency_ms: 0.6, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 65000, latency_ms: 0.9, loss_pct: 0.03 },
+      general: { tx_throughput_bps: 5500000, latency_ms: 0.7, loss_pct: 0.0 },
+    },
+    // all above min_throughput → all NOMINAL
+  },
+
+  agent_registration_spike: {
+    timestamp: "",
+    allocations: {
+      vle: 300000000,
+      student_portal: 180000000,
+      admin: 80000000,
+      iot: 50000000,
+      general: 40000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 428000000, latency_ms: 11.8, loss_pct: 0.0 },
+      student_portal: {
+        tx_throughput_bps: 151200000,
+        latency_ms: 24.2,
+        loss_pct: 0.0,
+      },
+      admin: { tx_throughput_bps: 84200000, latency_ms: 9.0, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 13000000, latency_ms: 113.7, loss_pct: 0.06 },
+      general: {
+        tx_throughput_bps: 310700000,
+        latency_ms: 45.7,
+        loss_pct: 0.0,
+      },
+    },
+    // iot latency 113.7 > max 200? no. but loss 0.06 > max 5.0? no.
+    // iot throughput 13000000 > min 64000? yes. → actually NOMINAL
+    // tweak numbers to get violations you want to demo
+  },
+
+  agent_quiz_spike: {
+    timestamp: "",
+    allocations: {
+      vle: 350000000,
+      student_portal: 100000000,
+      admin: 80000000,
+      iot: 80000000,
+      general: 40000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 390000000, latency_ms: 18.4, loss_pct: 0.0 },
+      student_portal: {
+        tx_throughput_bps: 60000000,
+        latency_ms: 8.1,
+        loss_pct: 0.0,
+      },
+      admin: { tx_throughput_bps: 70000000, latency_ms: 7.2, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 65000, latency_ms: 1.1, loss_pct: 0.03 },
+      general: { tx_throughput_bps: 30000000, latency_ms: 12.0, loss_pct: 0.0 },
+    },
+  },
+
+  static_normal: {
+    timestamp: "",
+    allocations: {
+      vle: 130000000,
+      student_portal: 130000000,
+      admin: 130000000,
+      iot: 130000000,
+      general: 130000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 55000000, latency_ms: 1.4, loss_pct: 0.0 },
+      student_portal: {
+        tx_throughput_bps: 26000000,
+        latency_ms: 0.9,
+        loss_pct: 0.0,
+      },
+      admin: { tx_throughput_bps: 11000000, latency_ms: 0.7, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 65000, latency_ms: 1.0, loss_pct: 0.03 },
+      general: { tx_throughput_bps: 5500000, latency_ms: 0.8, loss_pct: 0.0 },
+    },
+  },
+
+  static_registration_spike: {
+    timestamp: "",
+    allocations: {
+      vle: 130000000,
+      student_portal: 130000000,
+      admin: 130000000,
+      iot: 130000000,
+      general: 130000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 40000000, latency_ms: 95.0, loss_pct: 0.45 }, // WARNING (near threshold)
+      student_portal: {
+        tx_throughput_bps: 20000000,
+        latency_ms: 55.0,
+        loss_pct: 0.12,
+      }, // VIOLATION (loss > 0.1, thrpt < 25000000)
+      admin: { tx_throughput_bps: 80000000, latency_ms: 14.0, loss_pct: 0.0 }, // NOMINAL
+      iot: { tx_throughput_bps: 65000, latency_ms: 185.0, loss_pct: 0.08 }, // WARNING (latency near 200)
+      general: { tx_throughput_bps: 5500000, latency_ms: 62.0, loss_pct: 0.0 }, // NOMINAL
+    },
+  },
+
+  static_quiz_spike: {
+    timestamp: "",
+    allocations: {
+      vle: 130000000,
+      student_portal: 130000000,
+      admin: 130000000,
+      iot: 130000000,
+      general: 130000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 45000000, latency_ms: 82.0, loss_pct: 0.38 }, // WARNING
+      student_portal: {
+        tx_throughput_bps: 26000000,
+        latency_ms: 6.0,
+        loss_pct: 0.0,
+      }, // NOMINAL
+      admin: { tx_throughput_bps: 11000000, latency_ms: 5.0, loss_pct: 0.0 }, // NOMINAL
+      iot: { tx_throughput_bps: 65000, latency_ms: 1.2, loss_pct: 0.03 }, // NOMINAL
+      general: { tx_throughput_bps: 5500000, latency_ms: 4.0, loss_pct: 0.0 }, // NOMINAL
+    },
+  },
+
+  heuristic_normal: {
+    timestamp: "",
+    allocations: {
+      vle: 200000000,
+      student_portal: 140000000,
+      admin: 110000000,
+      iot: 100000000,
+      general: 100000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 55000000, latency_ms: 1.3, loss_pct: 0.0 },
+      student_portal: {
+        tx_throughput_bps: 26000000,
+        latency_ms: 0.8,
+        loss_pct: 0.0,
+      },
+      admin: { tx_throughput_bps: 11000000, latency_ms: 0.6, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 65000, latency_ms: 0.9, loss_pct: 0.03 },
+      general: { tx_throughput_bps: 5500000, latency_ms: 0.7, loss_pct: 0.0 },
+    },
+  },
+
+  heuristic_registration_spike: {
+    timestamp: "",
+    allocations: {
+      vle: 240000000,
+      student_portal: 160000000,
+      admin: 100000000,
+      iot: 80000000,
+      general: 70000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 320000000, latency_ms: 28.0, loss_pct: 0.0 }, // NOMINAL
+      student_portal: {
+        tx_throughput_bps: 140000000,
+        latency_ms: 44.0,
+        loss_pct: 0.09,
+      }, // WARNING (latency near 50, loss near 0.1)
+      admin: { tx_throughput_bps: 90000000, latency_ms: 11.0, loss_pct: 0.0 }, // NOMINAL
+      iot: { tx_throughput_bps: 65000, latency_ms: 168.0, loss_pct: 0.06 }, // WARNING (latency near 200)
+      general: { tx_throughput_bps: 5500000, latency_ms: 49.0, loss_pct: 0.0 }, // NOMINAL
+    },
+  },
+
+  heuristic_quiz_spike: {
+    timestamp: "",
+    allocations: {
+      vle: 280000000,
+      student_portal: 120000000,
+      admin: 100000000,
+      iot: 90000000,
+      general: 60000000,
+    },
+    metrics: {
+      vle: { tx_throughput_bps: 340000000, latency_ms: 22.0, loss_pct: 0.0 }, // NOMINAL
+      student_portal: {
+        tx_throughput_bps: 55000000,
+        latency_ms: 7.0,
+        loss_pct: 0.0,
+      }, // NOMINAL
+      admin: { tx_throughput_bps: 60000000, latency_ms: 6.0, loss_pct: 0.0 }, // NOMINAL
+      iot: { tx_throughput_bps: 65000, latency_ms: 162.0, loss_pct: 0.03 }, // WARNING (latency within 20% of 200)
+      general: { tx_throughput_bps: 5500000, latency_ms: 15.0, loss_pct: 0.0 }, // NOMINAL
+    },
+  },
+};
+
+export function getDynamicState(mode: Mode, scenario: Scenario): WSMessage {
+  const key = `${mode}_${scenario}`;
+  return dynamicStates[key];
+}
+
+export function computeSLA(slice: SliceConfig, metrics: Metric) {
+  const latency = metrics.latency_ms ?? 0;
+  const loss = metrics.loss_pct ?? 0;
+
+  if (
+    latency > slice.max_latency_ms ||
+    loss > slice.max_loss_pct ||
+    metrics.tx_throughput_bps < slice.min_throughput_bps
+  ) {
+    return "VIOLATION";
+  }
+  if (
+    latency > slice.max_latency_ms * 0.8 ||
+    loss > slice.max_loss_pct * 0.8 ||
+    metrics.tx_throughput_bps < slice.min_throughput_bps * 1.2
+  ) {
+    return "WARNING";
+  }
+  return "NOMINAL";
+}
+
+export function generateHistory(snapshot: WSMessage, points: number): WSMessage[] {
+  return Array.from({ length: points }, (_, i) => ({
+    ...snapshot,
+    metrics: {
+      vle: {
+        ...snapshot.metrics.vle,
+        tx_throughput_bps:
+          snapshot.metrics.vle.tx_throughput_bps * (0.85 + Math.random() * 0.3),
+        latency_ms:
+          (snapshot.metrics.vle.latency_ms ?? 0) * (0.85 + Math.random() * 0.3),
+      },
+      student_portal: {
+        ...snapshot.metrics.student_portal,
+        tx_throughput_bps:
+          snapshot.metrics.student_portal.tx_throughput_bps *
+          (0.85 + Math.random() * 0.3),
+        latency_ms:
+          (snapshot.metrics.student_portal.latency_ms ?? 0) *
+          (0.85 + Math.random() * 0.3),
+      },
+      admin: {
+        ...snapshot.metrics.admin,
+        tx_throughput_bps:
+          snapshot.metrics.admin.tx_throughput_bps *
+          (0.85 + Math.random() * 0.3),
+        latency_ms:
+          (snapshot.metrics.admin.latency_ms ?? 0) *
+          (0.85 + Math.random() * 0.3),
+      },
+      iot: {
+        ...snapshot.metrics.iot,
+        tx_throughput_bps:
+          snapshot.metrics.iot.tx_throughput_bps * (0.85 + Math.random() * 0.3),
+        latency_ms:
+          (snapshot.metrics.iot.latency_ms ?? 0) * (0.85 + Math.random() * 0.3),
+      },
+      general: {
+        ...snapshot.metrics.general,
+        tx_throughput_bps:
+          snapshot.metrics.general.tx_throughput_bps *
+          (0.85 + Math.random() * 0.3),
+        latency_ms:
+          (snapshot.metrics.general.latency_ms ?? 0) *
+          (0.85 + Math.random() * 0.3),
+      },
+    },
+    timestamp: new Date(Date.now() - (points - i) * 5000).toISOString(),
+  }));
+}
+
+

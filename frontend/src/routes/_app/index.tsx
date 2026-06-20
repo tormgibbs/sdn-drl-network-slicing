@@ -1,9 +1,76 @@
-import { createFileRoute } from '@tanstack/react-router'
-export const Route = createFileRoute('/_app/')({ component: Home })
+// routes/_app/index.tsx
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { computeSLA, getDynamicState, initialData } from "#/data/dashboard";
+import { SliceTable } from "#/components/primitives/slice-table.tsx";
+import { PerformanceCharts } from "#/components/primitives/performance-charts";
+import { SidePanel } from "#/components/primitives/side-panel";
+import type { Mode, Scenario } from "#/types/slice";
+
+export const Route = createFileRoute("/_app/")({ component: Home });
 
 function Home() {
-  return (
-   <div className='text-foreground'>Hello "/dashboard"!</div>
+  const [controllerMode, setControllerMode] = useState<Mode>("agent");
+  const [scenarioMode, setScenarioMode] = useState<Scenario>("normal");
 
-  )
+  const dynamicData = getDynamicState(controllerMode, scenarioMode);
+
+  const totalAllocated = Object.values(dynamicData.allocations).reduce(
+    (a, b) => a + b,
+    0,
+  );
+  const MAX_BW = 1_000_000_000;
+  const utilisedPct = ((totalAllocated / MAX_BW) * 100).toFixed(1);
+
+  const totalAggregate =
+    (dynamicData.metrics.vle.tx_throughput_bps +
+      dynamicData.metrics.student_portal.tx_throughput_bps +
+      dynamicData.metrics.admin.tx_throughput_bps +
+      dynamicData.metrics.iot.tx_throughput_bps +
+      dynamicData.metrics.general.tx_throughput_bps) /
+    1_000_000;
+
+  const sliceKeys = Object.keys(initialData.slices) as Array<
+    keyof typeof initialData.slices
+  >;
+
+  const breachedSlice = sliceKeys.find((key) => {
+    const latency = dynamicData.metrics[key].latency_ms ?? 0;
+    return latency > initialData.slices[key].max_latency_ms;
+  });
+
+  const nominalCount = sliceKeys.filter(
+    (key) =>
+      computeSLA(initialData.slices[key], dynamicData.metrics[key]) ===
+      "NOMINAL",
+  ).length;
+  const slaSatisfaction = ((nominalCount / sliceKeys.length) * 100).toFixed(1);
+
+  return (
+    <div className="text-foreground p-4 flex justify-between gap-8">
+      {/* Main Dashboard */}
+      <div className="bg-muted p-4 flex-1">
+        <div className="flex justify-between items-center mb-4">
+          <p className="font-semibold text-3xl">Network Slice Status</p>
+          <p>SYNC: 1.2ms ago</p>
+        </div>
+
+        <SliceTable dynamicData={dynamicData} utilisedPct={utilisedPct} />
+        <PerformanceCharts
+          dynamicData={dynamicData}
+          totalAggregate={totalAggregate}
+          breachedSlice={breachedSlice}
+        />
+      </div>
+
+      {/* Side Panel */}
+      <SidePanel
+        controllerMode={controllerMode}
+        scenarioMode={scenarioMode}
+        slaSatisfaction={slaSatisfaction}
+        onModeChange={setControllerMode}
+        onScenarioChange={setScenarioMode}
+      />
+    </div>
+  );
 }
