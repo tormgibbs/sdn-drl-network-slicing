@@ -30,6 +30,12 @@ export type StateResponse = {
   system: SystemInfo;
 };
 
+export type SliceSLA = {
+  priority: number;
+  priority_label: string;
+  sla_status: SLAStatus;
+};
+
 // what WebSocket pushes every 5 seconds
 export type WSMessage = {
   metrics: Record<SliceKey, Metric>;

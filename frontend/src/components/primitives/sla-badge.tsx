@@ -1,24 +1,24 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { SlaStatus } from "@/types/slice";
+import type { SLAStatus } from "@/types/slice";
 
-const CONFIG: Record<SlaStatus, { label: string; className: string }> = {
-	met: {
-		label: "MET",
+const CONFIG: Record<SLAStatus, { label: string; className: string }> = {
+	NOMINAL: {
+		label: "NOMINAL",
 		className: "bg-success/10 text-success border-success/20",
 	},
-	warning: {
+	WARNING: {
 		label: "WARNING",
 		className: "bg-warning/10 text-warning border-warning/20",
 	},
-	violated: {
-		label: "VIOLATED",
+	VIOLATION: {
+		label: "VIOLATION",
 		className: "bg-error/10 text-error border-error/20",
 	},
 };
 
 interface Props {
-	status: SlaStatus;
+	status: SLAStatus;
 }
 
 export function SlaBadge({ status }: Props) {

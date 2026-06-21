@@ -1,6 +1,5 @@
-// components/dashboard/performance-charts.tsx
 import { useState, useMemo } from "react";
-import { Line, LineChart, XAxis, YAxis, Tooltip } from "recharts";
+import { Line, LineChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { generateHistory, initialData } from "#/data/dashboard";
 import type { WSMessage } from "#/types/slice";
 
@@ -14,18 +13,19 @@ const SLICE_LINES = [
   { key: "general", stroke: "#a855f7" },
 ];
 
-// const CustomTooltip = ({ active, payload }: any) => {
-//   if (!active || !payload?.length) return null;
-//   return (
-//     <div className="bg-background border border-border px-2 py-1 text-xs font-mono">
-//       {payload.map((p: any) => (
-//         <div key={p.dataKey} style={{ color: p.color }}>
-//           {p.dataKey}: {Number(p.value).toFixed(1)}
-//         </div>
-//       ))}
-//     </div>
-//   );
-// };
+const CustomTooltip = ({ active, payload }: any) => {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="bg-background border border-border px-2 py-1 text-xs font-mono space-y-0.5">
+      {payload.map((p: any) => (
+        <div key={p.dataKey} style={{ color: p.color }}>
+          {p.dataKey}: {Number(p.value).toFixed(1)}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 type PerformanceChartsProps = {
   dynamicData: WSMessage;
@@ -93,20 +93,24 @@ export function PerformanceCharts({
               {totalAggregate.toFixed(1)} Mbps
             </p>
           </div>
-          <LineChart width={280} height={200} data={throughputData}>
-            <XAxis dataKey="time" hide />
-            <YAxis hide />
-            {SLICE_LINES.map((s) => (
-              <Line
-                key={s.key}
-                type="monotone"
-                dataKey={s.key}
-                stroke={s.stroke}
-                dot={false}
-                strokeWidth={2}
-              />
-            ))}
-          </LineChart>
+          <ResponsiveContainer width={"100%"} height={200}>
+            <LineChart data={throughputData}>
+              <XAxis dataKey="time" hide />
+              <YAxis hide />
+              <Tooltip content={<CustomTooltip />} cursor={false} />
+              {SLICE_LINES.map((s) => (
+                <Line
+                  key={s.key}
+                  type="monotone"
+                  dataKey={s.key}
+                  stroke={s.stroke}
+                  dot={true}
+                  activeDot={false}
+                  strokeWidth={2}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
         </div>
 
         {/* Latency Per Slice */}
@@ -121,20 +125,24 @@ export function PerformanceCharts({
               </p>
             )}
           </div>
-          <LineChart width={280} height={200} data={latencyData}>
-            <XAxis dataKey="time" hide />
-            <YAxis hide />
-            {SLICE_LINES.map((s) => (
-              <Line
-                key={s.key}
-                type="monotone"
-                dataKey={s.key}
-                stroke={s.stroke}
-                dot={false}
-                strokeWidth={2}
-              />
-            ))}
-          </LineChart>
+          <ResponsiveContainer width={"100%"} height={200}>
+            <LineChart data={latencyData}>
+              <XAxis dataKey="time" hide />
+              <YAxis hide />
+              <Tooltip content={<CustomTooltip />} cursor={false} />
+              {SLICE_LINES.map((s) => (
+                <Line
+                  key={s.key}
+                  type="monotone"
+                  dataKey={s.key}
+                  stroke={s.stroke}
+                  activeDot={false}
+                  dot={true}
+                  strokeWidth={2}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
     </div>

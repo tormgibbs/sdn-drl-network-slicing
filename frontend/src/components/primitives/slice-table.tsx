@@ -40,10 +40,17 @@ export function SliceTable({ dynamicData, utilisedPct }: SliceTableProps) {
               WARNING: "yellow",
               NOMINAL: "green",
             }[sla];
+            const priorityColor = {
+              PR1: "#a855f7",
+              PR2: "#ef4444",
+              PR3: "#f97316",
+              PR4: "#22c55e",
+              PR5: "#3b82f6",
+            }[slice.priority_label];
 
             return (
               <TableRow key={key}>
-                <TableCell>{slice.priority_label}</TableCell>
+                <TableCell style={{color: priorityColor}}>{slice.priority_label}</TableCell>
                 <TableCell>{slice.name}</TableCell>
                 <TableCell style={{ color: slaColor }}>{sla}</TableCell>
                 <TableCell>
