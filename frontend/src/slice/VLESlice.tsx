@@ -60,8 +60,8 @@ export function VLESlice({
       }}
       history={{ rows: history, title: "History — Last 50 Cycles" }}
     >
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Throughput</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Throughput</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -84,8 +84,8 @@ export function VLESlice({
         </div>
       </div>
 
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Latency</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Latency</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -102,8 +102,8 @@ export function VLESlice({
         </div>
       </div>
 
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Packet Loss</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Packet Loss</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -126,8 +126,8 @@ export function VLESlice({
         </div>
       </div>
 
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Allocation History</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Allocation History</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>

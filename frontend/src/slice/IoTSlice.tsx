@@ -68,37 +68,33 @@ export function IoTSlice({
   // IoT sidebar: source list
   const sidebarChildren = (
     <>
-      <div style={{ padding: "8px 16px 6px", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, letterSpacing: "0.1em", color: "var(--text-ter)", textTransform: "uppercase", marginBottom: 6 }}>
+      <div className="px-4 py-2 border-b border-white/10">
+        <div className="font-mono text-[9px] tracking-widest text-white/30 uppercase mb-1.5">
           Traffic Sources
         </div>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          <span className="badge badge-green">{onSchedule} ON-TIME</span>
-          {delayed > 0 && <span className="badge badge-amber">{delayed} DELAYED</span>}
-          {missed  > 0 && <span className="badge badge-red">{missed} MISSED</span>}
+        <div className="flex gap-1 flex-wrap">
+          <span className="font-mono text-[9px] px-1.5 py-0.5 rounded border text-emerald-400 border-emerald-500/30 bg-emerald-500/10 uppercase tracking-widest">{onSchedule} ON-TIME</span>
+          {delayed > 0 && <span className="font-mono text-[9px] px-1.5 py-0.5 rounded border text-amber-400 border-amber-500/30 bg-amber-500/10 uppercase tracking-widest">{delayed} DELAYED</span>}
+          {missed  > 0 && <span className="font-mono text-[9px] px-1.5 py-0.5 rounded border text-red-400 border-red-500/30 bg-red-500/10 uppercase tracking-widest">{missed} MISSED</span>}
         </div>
       </div>
       {sources.map((s) => (
         <button
           key={s.id}
           onClick={() => setSelSrc(s.id)}
+          className="flex flex-col gap-0.5 w-full px-4 py-1.5 border-b border-white/10 cursor-pointer text-left bg-transparent border-0 border-l-2 transition-colors"
           style={{
-            display: "flex", flexDirection: "column", gap: 2,
-            width: "100%", padding: "6px 16px",
-            background:   selSrc === s.id ? "var(--bg-elevated)" : "transparent",
-            border:       "none",
-            borderLeft:   `2px solid ${selSrc === s.id ? STATUS_COLOR[s.status] : "transparent"}`,
-            borderBottom: "1px solid var(--border)",
-            cursor: "pointer", textAlign: "left",
+            borderLeftColor: selSrc === s.id ? STATUS_COLOR[s.status] : "transparent",
+            background: selSrc === s.id ? "rgba(255,255,255,0.04)" : "transparent",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="status-dot" style={{ background: STATUS_COLOR[s.status], flexShrink: 0 }} />
-            <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-pri)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: STATUS_COLOR[s.status] }} />
+            <span className="text-[11px] font-medium text-white truncate">
               {s.name}
             </span>
           </div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "var(--text-ter)", paddingLeft: 14 }}>
+          <div className="font-mono text-[9px] text-white/30 pl-3">
             {s.id} · {fmtArrival(s.lastArrival)} ago
           </div>
         </button>
@@ -132,10 +128,10 @@ export function IoTSlice({
         ],
         extraChips: (
           <>
-            <span className="metric-chip" style={{ color: "var(--text-sec)", borderColor: "var(--border)" }}>
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/50 bg-white/5">
               {last.pktRate?.toFixed(0)} pkts/min
             </span>
-            <span className="metric-chip" style={{ color: "var(--text-sec)", borderColor: "var(--border)" }}>
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/50 bg-white/5">
               {last.sources} active
             </span>
           </>
@@ -178,8 +174,8 @@ export function IoTSlice({
       }}
     >
       {/* Packet Rate */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Packet Rate</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Packet Rate</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -201,8 +197,8 @@ export function IoTSlice({
       </div>
 
       {/* Heartbeat Latency */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Heartbeat Latency</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Heartbeat Latency</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -220,8 +216,8 @@ export function IoTSlice({
       </div>
 
       {/* Packet Loss */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Packet Loss</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Packet Loss</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -245,8 +241,8 @@ export function IoTSlice({
       </div>
 
       {/* Active Sources */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Active Sources</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Active Sources</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>

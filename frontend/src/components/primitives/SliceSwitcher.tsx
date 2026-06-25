@@ -1,15 +1,9 @@
-// ── SliceSwitcher ─────────────────────────────────────────────────────────────
-// A horizontal tab strip that sits above the slice content.
-// Rendered once inside SliceLayout — each tab is a pill showing
-// the slice name, priority badge, and a live SLA status dot.
-
 export type SliceKey = "vle" | "student_portal" | "admin" | "iot" | "general";
 
 export interface SliceTab {
   key:      SliceKey;
   label:    string;
   priority: string;
-  /** Pass the current live SLA status so the dot stays reactive */
   slaOk:    boolean;
 }
 
@@ -21,61 +15,36 @@ interface SliceSwitcherProps {
 
 export function SliceSwitcher({ tabs, active, onChange }: SliceSwitcherProps) {
   return (
-    <div style={{
-      display:         "flex",
-      alignItems:      "center",
-      gap:             1,
-      backgroundColor: "var(--border)",
-      borderBottom:    "1px solid var(--border)",
-      overflowX:       "auto",
-    }}>
+    <div className="flex overflow-x-auto border-b border-white/10 bg-black">
       {tabs.map((t) => {
         const isActive = t.key === active;
         return (
           <button
             key={t.key}
             onClick={() => onChange(t.key)}
-            style={{
-              display:        "flex",
-              alignItems:     "center",
-              gap:            6,
-              padding:        "0 14px",
-              height:         34,
-              background:     isActive ? "var(--bg-elevated)" : "var(--bg-base)",
-              border:         "none",
-              borderBottom:   isActive
-                ? "2px solid #2B7FFF"
-                : "2px solid transparent",
-              cursor:         "pointer",
-              fontFamily:     "'JetBrains Mono', monospace",
-              fontSize:       11,
-              color:          isActive ? "var(--text-pri)" : "var(--text-ter)",
-              whiteSpace:     "nowrap",
-              transition:     "color 0.15s, border-color 0.15s",
-            }}
+            className={[
+              "flex items-center gap-2 px-4 h-9 shrink-0 border-b-2 transition-colors duration-150",
+              "font-mono text-[11px] whitespace-nowrap cursor-pointer bg-transparent border-0",
+              isActive
+                ? "border-b-blue-500 text-white bg-white/5"
+                : "border-b-transparent text-white/40 hover:text-white/70",
+            ].join(" ")}
           >
-            {/* SLA status dot */}
-            <span style={{
-              width:        6,
-              height:       6,
-              borderRadius: "50%",
-              background:   t.slaOk ? "#4ADE80" : "#FB2C36",
-              flexShrink:   0,
-            }} />
+            {/* SLA dot */}
+            <span className={[
+              "w-1.5 h-1.5 rounded-full shrink-0",
+              t.slaOk ? "bg-emerald-400" : "bg-red-500",
+            ].join(" ")} />
 
             {t.label}
 
             {/* Priority badge */}
-            <span style={{
-              fontSize:    9,
-              fontFamily:  "'JetBrains Mono', monospace",
-              color:       isActive ? "#2B7FFF" : "var(--text-ter)",
-              background:  isActive ? "#2B7FFF18" : "transparent",
-              border:      `1px solid ${isActive ? "#2B7FFF44" : "var(--border)"}`,
-              borderRadius: 3,
-              padding:     "1px 5px",
-              letterSpacing: "0.05em",
-            }}>
+            <span className={[
+              "font-mono text-[9px] px-1.5 py-0.5 rounded border",
+              isActive
+                ? "text-blue-400 border-blue-500/30 bg-blue-500/10"
+                : "text-white/30 border-white/10",
+            ].join(" ")}>
               {t.priority}
             </span>
           </button>

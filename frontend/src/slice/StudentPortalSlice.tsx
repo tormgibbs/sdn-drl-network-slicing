@@ -63,10 +63,10 @@ export function StudentPortalSlice({
         ],
         extraChips: (
           <>
-            <span className="metric-chip" style={{ color: "var(--text-sec)", borderColor: "var(--border)" }}>
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/50 bg-white/5">
               {last.reqRate?.toFixed(1)} req/s
             </span>
-            <span className="metric-chip" style={{ color: "var(--text-sec)", borderColor: "var(--border)" }}>
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/50 bg-white/5">
               {last.sessions} sessions
             </span>
           </>
@@ -96,8 +96,8 @@ export function StudentPortalSlice({
       }}
     >
       {/* Throughput */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Throughput</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Throughput</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -121,8 +121,8 @@ export function StudentPortalSlice({
       </div>
 
       {/* HTTP Response Latency */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">HTTP Response Latency</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">HTTP Response Latency</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -140,8 +140,8 @@ export function StudentPortalSlice({
       </div>
 
       {/* Packet Loss */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Packet Loss</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Packet Loss</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -165,8 +165,8 @@ export function StudentPortalSlice({
       </div>
 
       {/* Concurrent Sessions */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Concurrent HTTP Sessions</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Concurrent HTTP Sessions</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>

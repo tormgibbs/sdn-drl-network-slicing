@@ -1,25 +1,17 @@
-// ── Shared recharts tooltip for all slice pages ───────────────────────────────
 import type { TooltipPayload } from "../../types/slice1";
 
 interface SliceTooltipProps {
-  active?:  boolean;
-  payload?: TooltipPayload[];
-  /** decimal places to show; defaults to 2 */
+  active?:   boolean;
+  payload?:  TooltipPayload[];
   decimals?: number;
 }
 
 export function SliceTooltip({ active, payload, decimals = 2 }: SliceTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div style={{
-      background: "#1C1B1B",
-      border: "1px solid #2A2A2A",
-      padding: "6px 10px",
-      fontFamily: "'JetBrains Mono', monospace",
-      fontSize: 11,
-    }}>
+    <div className="bg-zinc-950 border border-white/10 rounded px-3 py-2 font-mono text-[11px] shadow-lg">
       {payload.map((p) => (
-        <div key={p.name} style={{ color: p.color || "#E5E2E1" }}>
+        <div key={p.name} style={{ color: p.color || "#e5e2e1" }}>
           {p.name}:{" "}
           <strong>
             {typeof p.value === "number" ? p.value.toFixed(decimals) : p.value}

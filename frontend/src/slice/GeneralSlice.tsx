@@ -66,10 +66,10 @@ export function GeneralSlice({
         ],
         extraChips: (
           <>
-            <span className="metric-chip" style={{ color: PROTO_COLORS.https, borderColor: PROTO_COLORS.https + "44", fontSize: 11 }}>
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded border" style={{ color: PROTO_COLORS.https, borderColor: PROTO_COLORS.https + "44" }}>
               HTTPS {protoPct["HTTPS / TLS"]}%
             </span>
-            <span className="metric-chip" style={{ color: PROTO_COLORS.udp, borderColor: PROTO_COLORS.udp + "44", fontSize: 11 }}>
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded border" style={{ color: PROTO_COLORS.udp, borderColor: PROTO_COLORS.udp + "44" }}>
               UDP {protoPct["UDP Streaming"]}%
             </span>
           </>
@@ -97,8 +97,8 @@ export function GeneralSlice({
       }}
     >
       {/* Throughput */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Throughput</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Throughput</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -122,8 +122,8 @@ export function GeneralSlice({
       </div>
 
       {/* E2E Latency */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">E2E Latency</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">E2E Latency</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -141,8 +141,8 @@ export function GeneralSlice({
       </div>
 
       {/* Packet Loss */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Packet Loss</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Packet Loss</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
@@ -166,8 +166,8 @@ export function GeneralSlice({
       </div>
 
       {/* Protocol Distribution (stacked area) */}
-      <div style={{ background: "var(--bg-surface)" }}>
-        <div className="panel-hdr"><span className="panel-hdr-title">Protocol Breakdown</span></div>
+      <div className="bg-zinc-950">
+        <div className="px-3 h-7 flex items-center border-b border-white/10 bg-white/[0.03]"><span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Protocol Breakdown</span></div>
         <div style={{ padding: "8px 4px 4px" }}>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>

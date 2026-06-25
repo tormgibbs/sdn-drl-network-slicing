@@ -1,4 +1,3 @@
-// ── Shared layout shell for all network slice pages ───────────────────────────
 import { Download } from "lucide-react";
 import { SliceSwitcher } from "./SliceSwitcher";
 import type { SliceTab, SliceKey } from "./SliceSwitcher";
@@ -18,10 +17,10 @@ interface SliceHeaderProps {
 }
 
 interface RightPanelProps {
-  currentState:   MetricRowItem[];
-  slaThresholds:  SLACellItem[];
-  recentCycles:   RecentCycle[];
-  recentCols?:    [string, string];
+  currentState:     MetricRowItem[];
+  slaThresholds:    SLACellItem[];
+  recentCycles:     RecentCycle[];
+  recentCols?:      [string, string];
   recentSecondKey?: "thrpt" | "lat";
 }
 
@@ -34,54 +33,76 @@ interface HistoryTableProps {
 }
 
 export interface SliceLayoutProps {
-  // ── switcher ──
-  /** All five tabs with live SLA status — drives the switcher */
-  switcherTabs:     SliceTab[];
-  activeSlice:      SliceKey;
-  onSliceChange:    (key: SliceKey) => void;
-  // ── slice content ──
-  header:           SliceHeaderProps;
-  right:            RightPanelProps;
-  history:          HistoryTableProps;
-  children:         React.ReactNode;
-  telemetryLabel?:  string;
-  timeRange:        "1M" | "5M" | "15M";
-  onTimeRangeChange:(r: "1M" | "5M" | "15M") => void;
+  switcherTabs:      SliceTab[];
+  activeSlice:       SliceKey;
+  onSliceChange:     (key: SliceKey) => void;
+  header:            SliceHeaderProps;
+  right:             RightPanelProps;
+  history:           HistoryTableProps;
+  children:          React.ReactNode;
+  telemetryLabel?:   string;
+  timeRange:         "1M" | "5M" | "15M";
+  onTimeRangeChange: (r: "1M" | "5M" | "15M") => void;
+  sidebarChildren?:  React.ReactNode;
 }
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
 function SliceHeader({ name, priority, slaMet, metricChips, extraChips, slaTargets }: SliceHeaderProps) {
   return (
-    <div className="vle-header">
-      <span className="vle-name">{name}</span>
-      <span className="badge badge-gray">{priority}</span>
-      <span className={`badge ${slaMet ? "badge-green" : "badge-red"}`}>
+    <div className="flex flex-wrap items-center gap-2 px-4 h-11 border-b border-white/10 bg-zinc-950">
+      <span className="font-mono text-[13px] font-semibold text-white tracking-wide">{name}</span>
+
+      {/* Priority badge */}
+      <span className="font-mono text-[9px] px-1.5 py-0.5 rounded border border-white/15 text-white/50 bg-white/5">
+        {priority}
+      </span>
+
+      {/* SLA status */}
+      <span className={[
+        "font-mono text-[9px] px-1.5 py-0.5 rounded border font-medium tracking-widest uppercase",
+        slaMet
+          ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+          : "text-red-400 border-red-500/30 bg-red-500/10",
+      ].join(" ")}>
         {slaMet ? "MET" : "VIOLATION"}
       </span>
-      <div style={{ display: "flex", gap: 6, marginLeft: 12 }}>
+
+      {/* Metric chips */}
+      <div className="flex gap-1.5 ml-2">
         {metricChips.map((v) => (
-          <span key={v} className="metric-chip">{v}</span>
+          <span key={v} className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/70 bg-white/5">
+            {v}
+          </span>
         ))}
       </div>
-      {extraChips && (
-        <div style={{ display: "flex", gap: 6, marginLeft: 6 }}>
-          {extraChips}
-        </div>
-      )}
-      <span className="sla-targets">{slaTargets}</span>
+
+      {extraChips && <div className="flex gap-1.5">{extraChips}</div>}
+
+      <span className="font-mono text-[10px] text-white/30 ml-auto">{slaTargets}</span>
     </div>
   );
 }
 
 function CurrentStatePanel({ rows }: { rows: MetricRowItem[] }) {
   return (
-    <div className="panel">
-      <div className="panel-hdr"><span className="panel-hdr-title">Current State</span></div>
+    <div className="border-b border-white/10">
+      <div className="px-4 h-8 flex items-center border-b border-white/10 bg-white/[0.03]">
+        <span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Current State</span>
+      </div>
       {rows.map(({ label, value, highlight }, idx) => (
-        <div key={`${label}-${idx}`} className="metric-row" style={{ background: highlight ? "#111111" : undefined }}>
-          <span className="metric-row-label">{label}</span>
-          <span className="metric-row-value">{value}</span>
+        <div
+          key={`${label}-${idx}`}
+          className={[
+            "flex items-center justify-between px-4 py-1.5",
+            highlight ? "bg-white/[0.04]" : "hover:bg-white/[0.02]",
+          ].join(" ")}
+        >
+          <span className="font-mono text-[10px] text-white/35 uppercase tracking-wider">{label}</span>
+          <span className={[
+            "font-mono text-[11px]",
+            highlight ? "text-blue-400" : "text-white/80",
+          ].join(" ")}>{value}</span>
         </div>
       ))}
     </div>
@@ -90,13 +111,24 @@ function CurrentStatePanel({ rows }: { rows: MetricRowItem[] }) {
 
 function SLAThresholdsPanel({ cells }: { cells: SLACellItem[] }) {
   return (
-    <div className="panel">
-      <div className="panel-hdr"><span className="panel-hdr-title">SLA Thresholds</span></div>
-      <div className="sla-grid">
+    <div className="border-b border-white/10">
+      <div className="px-4 h-8 flex items-center border-b border-white/10 bg-white/[0.03]">
+        <span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">SLA Thresholds</span>
+      </div>
+      <div className="grid grid-cols-2 gap-px bg-white/10 m-2 rounded overflow-hidden">
         {cells.map(({ label, value, highlight }) => (
-          <div key={label} className="sla-cell" style={{ background: highlight ? "#111111" : undefined }}>
-            <div className="sla-cell-label">{label}</div>
-            <div className="sla-cell-value">{value}</div>
+          <div
+            key={label}
+            className={[
+              "flex flex-col px-3 py-2",
+              highlight ? "bg-white/[0.06]" : "bg-zinc-950",
+            ].join(" ")}
+          >
+            <span className="font-mono text-[9px] text-white/30 uppercase tracking-widest mb-0.5">{label}</span>
+            <span className={[
+              "font-mono text-[12px] font-semibold",
+              highlight ? "text-blue-400" : "text-white/75",
+            ].join(" ")}>{value}</span>
           </div>
         ))}
       </div>
@@ -106,33 +138,37 @@ function SLAThresholdsPanel({ cells }: { cells: SLACellItem[] }) {
 
 function RecentCyclesPanel({ cycles, cols = ["THRPT", "LAT"] }: { cycles: RecentCycle[]; cols?: [string, string] }) {
   return (
-    <div className="panel" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <div className="panel-hdr"><span className="panel-hdr-title">Recent Cycles</span></div>
-      <div style={{ overflowY: "auto", flex: 1 }}>
-        <table className="data-table">
+    <div className="flex flex-col flex-1 overflow-hidden border-b border-white/10">
+      <div className="px-4 h-8 flex items-center border-b border-white/10 bg-white/[0.03] shrink-0">
+        <span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">Recent Cycles</span>
+      </div>
+      <div className="overflow-y-auto flex-1">
+        <table className="w-full text-[10px] font-mono">
           <thead>
-            <tr>
-              <th style={{ width: 20 }}>ST</th>
-              <th>CYCLE ID</th>
-              <th style={{ textAlign: "right" }}>{cols[0]}</th>
-              <th style={{ textAlign: "right" }}>{cols[1]}</th>
+            <tr className="border-b border-white/10">
+              <th className="w-6 px-3 py-1.5 text-left text-white/30 font-normal">ST</th>
+              <th className="px-3 py-1.5 text-left text-white/30 font-normal">CYCLE ID</th>
+              <th className="px-3 py-1.5 text-right text-white/30 font-normal">{cols[0]}</th>
+              <th className="px-3 py-1.5 text-right text-white/30 font-normal">{cols[1]}</th>
             </tr>
           </thead>
           <tbody>
-            {cycles.slice(0, 7).map((c) => (
-              <tr key={c.id}>
-                <td>
-                  <span className="status-dot" style={{
-                    background:  c.status === "VIOLATION" ? "#EAB308" : "transparent",
-                    border:      `1px solid ${c.status === "VIOLATION" ? "#EAB308" : "#2A2A2A"}`,
-                    display:     "inline-block",
-                  }} />
-                </td>
-                <td className="td-pri">{c.id}</td>
-                <td style={{ textAlign: "right" }} className={c.status === "VIOLATION" ? "td-warn" : ""}>{c.thrpt}</td>
-                <td style={{ textAlign: "right" }} className={c.status === "VIOLATION" ? "td-warn" : ""}>{c.lat}</td>
-              </tr>
-            ))}
+            {cycles.slice(0, 7).map((c) => {
+              const isViolation = c.status === "VIOLATION";
+              return (
+                <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                  <td className="px-3 py-1.5">
+                    <span className={[
+                      "inline-block w-1.5 h-1.5 rounded-full",
+                      isViolation ? "bg-amber-400" : "bg-transparent border border-white/15",
+                    ].join(" ")} />
+                  </td>
+                  <td className={["px-3 py-1.5", isViolation ? "text-amber-400" : "text-white/60"].join(" ")}>{c.id}</td>
+                  <td className={["px-3 py-1.5 text-right", isViolation ? "text-amber-400" : "text-white/60"].join(" ")}>{c.thrpt}</td>
+                  <td className={["px-3 py-1.5 text-right", isViolation ? "text-amber-400" : "text-white/60"].join(" ")}>{c.lat}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -142,46 +178,56 @@ function RecentCyclesPanel({ cycles, cols = ["THRPT", "LAT"] }: { cycles: Recent
 
 function HistoryTable({ rows, title, thrptHeader = "THRPT (MBPS)", renderThrpt, renderAlloc }: HistoryTableProps) {
   return (
-    <div style={{ borderTop: "1px solid var(--border)" }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 12px", height: 32, background: "var(--bg-elevated)",
-        borderBottom: "1px solid var(--border)", position: "sticky", top: 0, zIndex: 10,
-      }}>
-        <span className="panel-hdr-title">{title}</span>
-        <button style={{ background: "none", border: "none", color: "var(--text-ter)", cursor: "pointer", display: "flex", alignItems: "center" }}>
-          <Download size={13} />
+    <div className="border-t border-white/10">
+      {/* Sticky header */}
+      <div className="flex items-center justify-between px-4 h-8 bg-zinc-950 border-b border-white/10 sticky top-0 z-10">
+        <span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">{title}</span>
+        <button className="text-white/30 hover:text-white/60 transition-colors cursor-pointer bg-transparent border-none p-0">
+          <Download size={12} />
         </button>
       </div>
-      <div style={{ maxHeight: 280, overflowY: "auto", overflowX: "auto" }}>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>TIMESTAMP</th>
-              <th>CYCLE ID</th>
-              <th style={{ textAlign: "right" }}>{thrptHeader}</th>
-              <th style={{ textAlign: "right" }}>LAT (MS)</th>
-              <th style={{ textAlign: "right" }}>LOSS (%)</th>
-              <th style={{ textAlign: "right" }}>ALLOC</th>
-              <th style={{ textAlign: "right" }}>SLA STATUS</th>
+      <div className="max-h-72 overflow-y-auto overflow-x-auto">
+        <table className="w-full text-[10px] font-mono min-w-[600px]">
+          <thead className="sticky top-0 bg-zinc-950 z-10">
+            <tr className="border-b border-white/10">
+              <th className="px-3 py-2 text-left text-white/30 font-normal">TIMESTAMP</th>
+              <th className="px-3 py-2 text-left text-white/30 font-normal">CYCLE ID</th>
+              <th className="px-3 py-2 text-right text-white/30 font-normal">{thrptHeader}</th>
+              <th className="px-3 py-2 text-right text-white/30 font-normal">LAT (MS)</th>
+              <th className="px-3 py-2 text-right text-white/30 font-normal">LOSS (%)</th>
+              <th className="px-3 py-2 text-right text-white/30 font-normal">ALLOC</th>
+              <th className="px-3 py-2 text-right text-white/30 font-normal">SLA STATUS</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, idx) => (
-              <tr key={row.id + idx} style={{ background: idx % 2 === 0 ? "var(--bg-base)" : "var(--bg-surface)" }}>
-                <td>{row.ts}</td>
-                <td className="td-pri">{row.id}</td>
-                <td style={{ textAlign: "right" }} className={row.sla === "VIOLATION" ? "td-violation" : ""}>
-                  {renderThrpt ? renderThrpt(row) : row.thrpt}
-                </td>
-                <td style={{ textAlign: "right" }} className={row.sla === "VIOLATION" ? "td-violation" : ""}>{row.lat}</td>
-                <td style={{ textAlign: "right" }}>{row.loss}</td>
-                <td style={{ textAlign: "right" }}>{renderAlloc ? renderAlloc(row) : row.alloc}</td>
-                <td style={{ textAlign: "right" }}>
-                  <span className={`badge ${row.sla === "MET" ? "badge-green" : "badge-red"}`}>{row.sla}</span>
-                </td>
-              </tr>
-            ))}
+            {rows.map((row, idx) => {
+              const isViolation = row.sla === "VIOLATION";
+              return (
+                <tr
+                  key={row.id + idx}
+                  className={["border-b border-white/5", idx % 2 === 0 ? "bg-transparent" : "bg-white/[0.02]"].join(" ")}
+                >
+                  <td className="px-3 py-1.5 text-white/40">{row.ts}</td>
+                  <td className="px-3 py-1.5 text-white/60">{row.id}</td>
+                  <td className={["px-3 py-1.5 text-right", isViolation ? "text-red-400" : "text-white/60"].join(" ")}>
+                    {renderThrpt ? renderThrpt(row) : row.thrpt}
+                  </td>
+                  <td className={["px-3 py-1.5 text-right", isViolation ? "text-red-400" : "text-white/60"].join(" ")}>{row.lat}</td>
+                  <td className="px-3 py-1.5 text-right text-white/50">{row.loss}</td>
+                  <td className="px-3 py-1.5 text-right text-white/50">{renderAlloc ? renderAlloc(row) : row.alloc}</td>
+                  <td className="px-3 py-1.5 text-right">
+                    <span className={[
+                      "font-mono text-[9px] px-1.5 py-0.5 rounded border uppercase tracking-widest",
+                      row.sla === "MET"
+                        ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                        : "text-red-400 border-red-500/30 bg-red-500/10",
+                    ].join(" ")}>
+                      {row.sla}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -190,8 +236,6 @@ function HistoryTable({ rows, title, thrptHeader = "THRPT (MBPS)", renderThrpt, 
 }
 
 // ── Main layout ───────────────────────────────────────────────────────────────
-// NOTE: AppSidebar is NOT rendered here — it lives in the parent route (_app.tsx)
-// so it stays mounted across slice switches without re-rendering.
 
 export function SliceLayout({
   switcherTabs,
@@ -204,6 +248,7 @@ export function SliceLayout({
   telemetryLabel = "Telemetry Timeline",
   timeRange,
   onTimeRangeChange,
+  sidebarChildren,
 }: SliceLayoutProps) {
   const recentCycles: RecentCycle[] = right.recentCycles.map((c) => ({
     id:     c.id,
@@ -213,60 +258,63 @@ export function SliceLayout({
   }));
 
   return (
-    <div className="slice-main">
-      {/* ── Slice switcher tab strip ── */}
-      <SliceSwitcher
-        tabs={switcherTabs}
-        active={activeSlice}
-        onChange={onSliceChange}
-      />
+    <div className="flex flex-col bg-black min-h-0">
+      {/* Slice switcher */}
+      <SliceSwitcher tabs={switcherTabs} active={activeSlice} onChange={onSliceChange} />
 
-      {/* ── Slice name / SLA status header ── */}
+      {/* Slice header */}
       <SliceHeader {...header} />
 
-      {/* ── Body grid ── */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 320px",
-        gap: 1,
-        backgroundColor: "var(--border)",
-      }}>
-        {/* Left — chart area */}
-        <div style={{ background: "var(--bg-base)", display: "flex", flexDirection: "column", gap: 1 }}>
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "0 12px", height: 32,
-            background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)",
-          }}>
-            <span className="panel-hdr-title">{telemetryLabel}</span>
-            <div className="tab-strip">
-              {(["1M", "5M", "15M"] as const).map((t) => (
-                <button
-                  key={t}
-                  className={`tab-btn ${timeRange === t ? "tab-btn--active" : ""}`}
-                  onClick={() => onTimeRangeChange(t)}
-                >
-                  {t}
-                </button>
-              ))}
+      {/* Body */}
+      <div className="flex flex-1 min-h-0">
+        {/* Optional IoT sidebar */}
+        {sidebarChildren && (
+          <div className="w-48 shrink-0 border-r border-white/10 flex flex-col overflow-y-auto bg-zinc-950">
+            {sidebarChildren}
+          </div>
+        )}
+
+        {/* Main grid: charts + right panel */}
+        <div className="flex flex-1 min-w-0">
+          {/* Chart area */}
+          <div className="flex flex-col flex-1 min-w-0">
+            {/* Telemetry bar */}
+            <div className="flex items-center justify-between px-4 h-8 border-b border-white/10 bg-zinc-950 shrink-0">
+              <span className="font-mono text-[10px] text-white/40 uppercase tracking-widest">{telemetryLabel}</span>
+              <div className="flex gap-px">
+                {(["1M", "5M", "15M"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => onTimeRangeChange(t)}
+                    className={[
+                      "font-mono text-[10px] px-2.5 py-1 cursor-pointer border-none transition-colors",
+                      timeRange === t
+                        ? "bg-white/10 text-white"
+                        : "bg-transparent text-white/35 hover:text-white/60",
+                    ].join(" ")}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 2×2 chart grid */}
+            <div className="grid grid-cols-2 gap-px bg-white/10 flex-1">
+              {children}
             </div>
           </div>
-          <div style={{
-            display: "grid", gridTemplateColumns: "1fr 1fr",
-            gap: 1, backgroundColor: "var(--border)", flex: 1,
-          }}>
-            {children}
-          </div>
-        </div>
 
-        {/* Right — panels */}
-        <div style={{ background: "var(--bg-base)", display: "flex", flexDirection: "column", gap: 1 }}>
-          <CurrentStatePanel rows={right.currentState} />
-          <SLAThresholdsPanel cells={right.slaThresholds} />
-          <RecentCyclesPanel cycles={recentCycles} cols={right.recentCols} />
+          {/* Right panel */}
+          <div className="w-72 shrink-0 border-l border-white/10 flex flex-col bg-black">
+            <CurrentStatePanel rows={right.currentState} />
+            <SLAThresholdsPanel cells={right.slaThresholds} />
+            <RecentCyclesPanel cycles={recentCycles} cols={right.recentCols} />
+          </div>
         </div>
       </div>
 
+      {/* History table */}
       <HistoryTable {...history} />
     </div>
   );
