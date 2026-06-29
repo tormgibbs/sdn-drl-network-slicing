@@ -6,6 +6,8 @@ sudo modprobe br_netfilter
 sudo sysctl -w net.bridge.bridge-nf-call-iptables=0 >/dev/null
 sudo sysctl -w net.bridge.bridge-nf-call-ip6tables=0 >/dev/null
 
+sudo setcap cap_sys_admin+ep $(which nsenter)
+
 echo "Waiting for OVS bridge s1..."
 until sudo ovs-vsctl br-exists s1 2>/dev/null; do sleep 1; done
 echo "    s1 ready"

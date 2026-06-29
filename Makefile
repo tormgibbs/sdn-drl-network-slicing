@@ -79,10 +79,13 @@ network-setup:
 	sudo bash scripts/network-setup.sh
 
 ue-setup:
-	@echo "Waiting for ue1tun0..."
-	@i=0; until docker exec ueransim ip link show ue1tun0 >/dev/null 2>&1; do \
-		i=$$((i+1)); [ $$i -ge 30 ] && echo "ERROR: ue1tun0 did not appear after 30s" && exit 1; \
-		sleep 1; \
+	@for ue in ue1tun0 ue2tun0 ue3tun0 ue4tun0 ue5tun0; do \
+		echo "Waiting for $$ue..."; \
+		i=0; until docker exec ueransim ip link show $$ue >/dev/null 2>&1; do \
+			i=$$((i+1)); [ $$i -ge 30 ] && echo "ERROR: $$ue did not appear after 30s" && exit 1; \
+			sleep 1; \
+		done; \
+		echo "    $$ue ready"; \
 	done
 	docker exec ueransim ip route add 10.0.0.0/8 dev ue1tun0 2>/dev/null || true
 	docker exec ueransim ip route add 10.0.2.0/24 dev ue2tun0 2>/dev/null || true

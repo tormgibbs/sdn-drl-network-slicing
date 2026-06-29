@@ -2,6 +2,29 @@ defaults:
   duration_sec: 60
   inter_loop_gap_sec: 5
 
+scenarios:
+  lecture:
+    vle: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
+    student_portal:
+      { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+    admin: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+    iot: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
+    general: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+  registration:
+    vle: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+    student_portal:
+      { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
+    admin: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
+    iot: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
+    general: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
+  off_peak:
+    vle: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+    student_portal:
+      { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+    admin: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+    iot: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+    general: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+
 traffic_profiles:
   vle:
     pattern: mixed
@@ -12,8 +35,11 @@ traffic_profiles:
     on_off_port: 5202
     mean_on_sec: 15
     mean_off_sec: 45
+    min_on_sec: 2
+    min_off_sec: 2
+    downlink_bps: 50_000_000
+    downlink_on_off_bps: 40_000_000
     device_count: 3000
-    
   student_portal:
     pattern: mixed
     protocol: tcp
@@ -23,26 +49,30 @@ traffic_profiles:
     on_off_port: 5202
     mean_on_sec: 8
     mean_off_sec: 20
+    min_on_sec: 2
+    min_off_sec: 2
+    downlink_bps: 20_000_000
+    downlink_on_off_bps: 20_000_000
     device_count: 2000
-    
   admin:
     pattern: continuous
     protocol: tcp
     target_bps: 10_000_000
     port: 5201
+    downlink_bps: 10_000_000
     device_count: 500
-    
   iot:
     pattern: continuous
     protocol: udp
     target_bps: 64_000
     packet_size: 64
     port: 5201
+    downlink_bps: 32_000
     device_count: 4000
-    
   general:
     pattern: continuous
     protocol: tcp
     target_bps: 5_000_000
     port: 5201
+    downlink_bps: 15_000_000
     device_count: 500

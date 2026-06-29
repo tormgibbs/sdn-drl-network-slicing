@@ -12,3 +12,4 @@ config/dpid_map.json
 *.apconf
 logs/
 infrastructure/free5gc/cert/
+*.zip

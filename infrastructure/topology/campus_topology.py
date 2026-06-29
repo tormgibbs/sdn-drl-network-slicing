@@ -3,6 +3,7 @@
 # Three-tier campus network topology. Core (s1), aggregation (s2, s3), access (ap1-ap5).
 
 
+import json
 import sys
 from pathlib import Path
 
@@ -163,6 +164,18 @@ def create_topology():
 	sta7.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta7.log')
 	sta9.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta9.log')
 
+	slice_sta_pids = {
+		'vle': sta1.pid,
+		'student_portal': sta3.pid,
+		'admin': sta5.pid,
+		'iot': sta7.pid,
+		'general': sta9.pid,
+	}
+	pid_path = Path('config/slice_pids.json')
+	pid_path.parent.mkdir(parents=True, exist_ok=True)
+	with open(pid_path, 'w') as f:
+		json.dump(slice_sta_pids, f, indent=2)
+	info(f'*** Slice PID map written to {pid_path}\n')
 
 	info('*** Verifying topology\n')
 	for node in [s1, s2, s3, ap1, ap2, ap3, ap4, ap5]:
