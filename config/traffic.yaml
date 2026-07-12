@@ -29,16 +29,16 @@ traffic_profiles:
   vle:
     pattern: mixed
     protocol: tcp
-    continuous_bps: 50_000_000
+    continuous_bps: 25_000_000
     continuous_port: 5201
-    on_off_bps: 30_000_000
+    on_off_bps: 18_000_000
     on_off_port: 5202
     mean_on_sec: 15
     mean_off_sec: 45
     min_on_sec: 2
     min_off_sec: 2
-    downlink_bps: 50_000_000
-    downlink_on_off_bps: 40_000_000
+    downlink_bps: 25_000_000
+    downlink_on_off_bps: 20_000_000
     device_count: 3000
   student_portal:
     pattern: mixed
