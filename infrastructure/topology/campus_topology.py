@@ -156,6 +156,16 @@ def create_topology():
 	sta9.cmd('arp -s 10.60.5.1 02:00:00:00:0c:00')
 
 	info('*** Starting iperf3 servers\n')
+
+	def start_iperf3_loop(node, port, logfile):
+		# -D can wedge permanently after an abnormal client disconnect
+		# (esnet/iperf#416, #1735); -1 + respawn avoids that entirely.
+		cmd = (
+			f'while true; do iperf3 -s -1 -p {port} --logfile {logfile}; '
+			f'done > /dev/null 2>&1 &'
+		)
+		node.cmd(cmd)
+
 	sta1.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta1-5201.log')
 	sta1.cmd('iperf3 -s -p 5202 -D --logfile /tmp/iperf3-sta1-5202.log')
 	sta3.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta3-5201.log')

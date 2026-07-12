@@ -52,12 +52,16 @@ class CampusSlicingEnv(gym.Env):
 		self.c_kbps = slices_config['network']['total_bandwidth_bps'] // 1000
 		validate_floors(self.floors_kbps, self.c_kbps)
 
+		for name in self.slice_order:
+			priority = self.slices_cfg[name]['priority']
+			assert priority > 0, f'slice {name!r} has non-positive priority: {priority}'
+
 		self.max_latency_ms = {
 			name: self.slices_cfg[name]['max_latency_ms'] for name in self.slice_order
 		}
 
 		self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.n_slices * 3,))
-		self.action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.n_slices,))
+		self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.n_slices,), dtype=np.float32)
 
 		self.episode_length = episode_length
 		self._step_count = 0
@@ -93,11 +97,35 @@ class CampusSlicingEnv(gym.Env):
 			self._ws = None
 		self._http.close()
 
+	def _assert_rates_valid(self) -> None:
+		assert self._current_rates_kbps is not None, '_current_rates_kbps not set'
+		assert all(r > 0 for r in self._current_rates_kbps.values()), (
+			f'all current rates must be positive (floor guarantee from '
+			f'project_allocation()) -- got {self._current_rates_kbps}'
+		)
+
+	def _utilisation(self, name: str, metrics: dict) -> float:
+		a_i_bps = self._current_rates_kbps[name] * 1000
+		return min(metrics[name]['tx_throughput_bps'] / a_i_bps, 1.0)
+
 	def _validate_metrics(self, metrics: dict) -> None:
 		for name in self.slice_order:
 			m = metrics[name]
-			assert m['latency_ms'] is not None, f'latency_ms is None for slice {name!r}'
-			assert m['loss_pct'] is not None, f'loss_pct is None for slice {name!r}'
+			loss_pct = m['loss_pct']
+			latency_ms = m['latency_ms']
+
+			if loss_pct is None:
+				raise ValueError(f'loss_pct is None for slice {name!r}')
+			if not (0.0 <= loss_pct <= 100.0):
+				raise ValueError(f'loss_pct out of range for slice {name!r}: {loss_pct}')
+
+			if latency_ms is None:
+				if loss_pct != 100.0:
+					raise ValueError(
+						f'latency_ms is None for slice {name!r} without 100% loss to explain it'
+					)
+			elif latency_ms < 0:
+				raise ValueError(f'negative latency_ms for slice {name!r}: {latency_ms}')
 
 	def _check_tunnel_interfaces(self) -> list[str]:
 		missing = []
@@ -159,32 +187,24 @@ class CampusSlicingEnv(gym.Env):
 				)
 
 	def _build_observation(self, metrics: dict) -> np.ndarray:
-		assert self._current_rates_kbps is not None, (
-			'_current_rates_kbps not set -- _build_observation() called before '
-			'reset()/step() applied an allocation'
-		)
+		self._assert_rates_valid()
 		obs = []
 		for name in self.slice_order:
 			m = metrics[name]
+			latency_ms = (
+				m['latency_ms'] if m['latency_ms'] is not None else self.max_latency_ms[name]
+			)
 
-			latency_i = min(m['latency_ms'] / self.max_latency_ms[name], 1.0)
+			latency_i = min(latency_ms / self.max_latency_ms[name], 1.0)
 			loss_i = m['loss_pct'] / 100.0
-			a_i_bps = self._current_rates_kbps[name] * 1000
-			utilisation_i = min(m['tx_throughput_bps'] / a_i_bps, 1.0)
+			utilisation_i = self._utilisation(name, metrics)
 
 			obs.extend([latency_i, loss_i, utilisation_i])
 
 		return np.array(obs, dtype=np.float32)
 
 	def _compute_reward(self, metrics: dict) -> float:
-		assert self._current_rates_kbps is not None, (
-			'_current_rates_kbps not set -- _compute_reward() called before '
-			'reset()/step() applied an allocation'
-		)
-		assert all(r > 0 for r in self._current_rates_kbps.values()), (
-			f'all current rates must be positive (floor guarantee from '
-			f'project_allocation()) -- got {self._current_rates_kbps}'
-		)
+		self._assert_rates_valid()
 
 		n = self.n_slices
 		r_sla = 0.0
@@ -200,7 +220,7 @@ class CampusSlicingEnv(gym.Env):
 			Li = cfg['max_latency_ms']
 			Loss_i = cfg['max_loss_pct']
 
-			latency_i = m['latency_ms']
+			latency_i = m['latency_ms'] if m['latency_ms'] is not None else Li
 			loss_i = m['loss_pct']
 
 			sla_met = latency_i <= Li and loss_i <= Loss_i
@@ -208,8 +228,7 @@ class CampusSlicingEnv(gym.Env):
 			p_latency += si * max(0.0, (latency_i - Li) / Li)
 			p_loss += si * loss_i
 
-			a_i_bps = self._current_rates_kbps[name] * 1000
-			r_util_sum += min(m['tx_throughput_bps'] / a_i_bps, 1.0)
+			r_util_sum += self._utilisation(name, metrics)
 
 			fairness_ratios.append(self._current_rates_kbps[name] / si)
 
@@ -239,6 +258,7 @@ class CampusSlicingEnv(gym.Env):
 			OSError,
 			websockets.WebSocketException,
 			AssertionError,
+			ValueError,
 			subprocess.SubprocessError,
 		) as exc:
 			raise RuntimeError(f'reset() failed to start episode: {exc}') from exc
@@ -259,6 +279,7 @@ class CampusSlicingEnv(gym.Env):
 			OSError,
 			websockets.WebSocketException,
 			AssertionError,
+			ValueError,
 		) as exc:
 			assert self._last_obs is not None, (
 				'infra failure on the very first step() call, before any '

@@ -61,6 +61,11 @@ smf-restart:
 		i=$$((i+1)); [ $$i -ge 30 ] && echo "ERROR: UPF did not become ready after 30s" && exit 1; \
 		sleep 1; \
 	done
+	@echo "Reapplying UPF route and NAT rules (lost on container restart)..."
+	docker exec upf ip route add 10.0.0.0/8 via 10.100.200.200 dev eth0 2>&1 || \
+		echo "    WARN: UPF route add failed or already exists"
+	docker exec upf iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || true
+	docker exec upf iptables -t nat -A POSTROUTING -s 10.60.0.0/16 -o eth0 ! -d 10.0.0.0/8 -j MASQUERADE
 	@SMF_TS=$$(date +%s); \
 	docker restart smf; \
 	echo "Waiting for SMF-UPF PFCP association..."; \
@@ -109,7 +114,7 @@ down:
 
 
 traffic-start:
-	uv run scripts/traffic_generator.py
+	sudo $(shell which uv) run scripts/traffic_generator.py
 
 traffic-stop:
 	pkill -f traffic_generator.py || true

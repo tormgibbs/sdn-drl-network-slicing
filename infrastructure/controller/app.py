@@ -35,6 +35,7 @@ from infrastructure.controller.stats_collector import StatsCollector
 
 DPID_MAP_PATH = 'config/dpid_map.json'
 SLICES_CONFIG_PATH = 'config/slices.yaml'
+TOPOLOGY_CONFIG_PATH = 'config/topology.yaml'
 
 
 def load_dpid_map() -> dict[int, str]:
@@ -52,6 +53,11 @@ def load_ap_vlan_map() -> dict[str, int]:
 		config = yaml.safe_load(f)
 	return {slice_cfg['ap']: slice_cfg['vlan'] for slice_cfg in config['slices'].values()}
 
+def load_stats_interval() -> int:
+	with open(TOPOLOGY_CONFIG_PATH) as f:
+		config = yaml.safe_load(f)
+	return config['controller']['stats_interval_sec']
+
 
 class CampusController(app_manager.OSKenApp):
 	OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -64,7 +70,7 @@ class CampusController(app_manager.OSKenApp):
 		set_dpid_map(self.dpid_to_name)
 		set_ap_vlan_map(load_ap_vlan_map())
 		self.meter_manager = MeterManager()
-		self.stats_collector = StatsCollector(interval_sec=5)
+		self.stats_collector = StatsCollector(interval_sec=load_stats_interval())
 		self.stats_collector.start()
 		registry.register(self.stats_collector, self.meter_manager)
 		start_api_server(host='0.0.0.0', port=8080)

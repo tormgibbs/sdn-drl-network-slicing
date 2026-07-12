@@ -13,3 +13,5 @@ config/dpid_map.json
 logs/
 infrastructure/free5gc/cert/
 *.zip
+config/slice_pids.json
+.vscode

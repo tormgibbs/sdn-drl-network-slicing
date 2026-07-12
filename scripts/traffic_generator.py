@@ -143,22 +143,13 @@ def start_downlink_servers(slice_network: dict) -> None:
 	time.sleep(1)
 
 	for slice_name, net in slice_network.items():
-		cmd = [
-			'docker',
-			'exec',
-			'-d',
-			'ueransim',
-			'iperf3',
-			'-s',
-			'-B',
-			net['ue_ip'],
-			'-p',
-			str(net['dl_port']),
-			'--logfile',
-			f'/tmp/iperf3-{net["tunnel"]}-dl.log',
-		]
 		# -B is required: without it iperf3 replies via the container default
 		# route instead of the GTP tunnel, breaking the downlink data path.
+		loop_cmd = (
+			f'while true; do iperf3 -s -1 -B {net["ue_ip"]} -p {net["dl_port"]} '
+			f'--logfile /tmp/iperf3-{net["tunnel"]}-dl.log; done'
+		)
+		cmd = ['docker', 'exec', '-d', 'ueransim', 'bash', '-c', loop_cmd]
 		result = subprocess.run(cmd, capture_output=True, text=True)
 		if result.returncode != 0:
 			raise RuntimeError(
@@ -224,7 +215,10 @@ def _run_iperf3(
 
 	result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 15)
 	if result.returncode != 0:
-		raise RuntimeError(result.stderr.strip())
+		raise RuntimeError(
+			f'exit={result.returncode} stderr={result.stderr.strip()!r} '
+			f'stdout={result.stdout.strip()[:500]!r}'
+		)
 	end = datetime.now(timezone.utc).isoformat()
 	return json.loads(result.stdout), start, end
 
@@ -262,7 +256,10 @@ def _run_iperf3_downlink(
 
 	result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 15)
 	if result.returncode != 0:
-		raise RuntimeError(result.stderr.strip())
+		raise RuntimeError(
+			f'exit={result.returncode} stderr={result.stderr.strip()!r} '
+			f'stdout={result.stdout.strip()[:500]!r}'
+		)
 	end = datetime.now(timezone.utc).isoformat()
 	return json.loads(result.stdout), start, end
 

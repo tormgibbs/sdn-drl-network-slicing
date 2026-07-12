@@ -278,6 +278,15 @@ class StatsCollector:
 					probe['error'],
 				)
 
+		for slice_name, probe in probe_results.items():
+			logger.info(
+				'Stats collector: probe result: slice=%s latency_ms=%s loss_pct=%s error=%s',
+				slice_name,
+				probe['latency_ms'],
+				probe['loss_pct'],
+				probe['error'],
+			)
+
 		with self._cache_lock:
 			for slice_name, probe in probe_results.items():
 				self._stats_cache[slice_name] = {
