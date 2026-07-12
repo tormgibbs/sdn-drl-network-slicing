@@ -24,7 +24,6 @@ for i in $(seq 1 30); do
   fi
   sleep 2
 done
-
 UPF_MAC=$(docker exec upf ip link show eth0 | awk '/ether/ {print $2}')
 if [ -z "$UPF_MAC" ]; then
   echo "ERROR: Could not get UPF MAC from eth0"
@@ -50,6 +49,11 @@ sudo ip addr add 10.100.200.200/24 dev upf-gw 2>&1 || \
 sudo ip link set upf-gw up
 sudo ip route add 10.0.0.0/8 dev upf-gw 2>&1 || \
   echo "    WARN: host route add failed or already exists"
+
+# br-free5gc and upf-gw share a subnet; strict rp_filter (default on
+# some platforms, e.g. GCP images) silently drops return traffic here.
+sudo sysctl -w net.ipv4.conf.br-free5gc.rp_filter=2 >/dev/null
+sudo sysctl -w net.ipv4.conf.upf-gw.rp_filter=2 >/dev/null
 
 echo "[6/7] Configuring UPF container routes..."
 docker exec upf ip route add 10.0.0.0/8 via 10.100.200.200 dev eth0 2>&1 || \
