@@ -221,6 +221,14 @@ def verify_tunnels(
 			text=True,
 		)
 		if result.returncode != 0:
+			if controller_owns_recovery:
+				if not _wait_for_slice_recovery(net):
+					raise RuntimeError(
+						f'Tunnel {net["tunnel"]} for slice {slice_name} does not exist '
+						'and controller recovery did not restore it in time.'
+					)
+				logger.info('Slice %s tunnel recovered by controller.', slice_name)
+				continue
 			raise RuntimeError(
 				f'Tunnel {net["tunnel"]} for slice {slice_name} does not exist. '
 				'Ensure UE sessions are attached before starting traffic.'
