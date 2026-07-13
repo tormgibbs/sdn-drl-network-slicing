@@ -6,8 +6,14 @@ topology:
 clean-topology:
 	sudo mn -c
 	sudo pkill -f iper'f3' 2>/dev/null || true
-	sudo ovs-vsctl --if-exists del-port s1 s1-upf
-	sudo ovs-vsctl --if-exists del-port s1 upf-gw
+	sudo ovs-vsctl --if-exists del-br s1
+	sudo ovs-vsctl --if-exists del-br s2
+	sudo ovs-vsctl --if-exists del-br s3
+	sudo ovs-vsctl --if-exists del-br ap1
+	sudo ovs-vsctl --if-exists del-br ap2
+	sudo ovs-vsctl --if-exists del-br ap3
+	sudo ovs-vsctl --if-exists del-br ap4
+	sudo ovs-vsctl --if-exists del-br ap5
 	sudo ovs-vsctl --all destroy QoS
 	sudo ovs-vsctl --all destroy Queue
 	sudo ip link del s1-upf 2>/dev/null || true
