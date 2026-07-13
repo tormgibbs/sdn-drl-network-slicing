@@ -22,6 +22,7 @@ LOG_DIR = Path('logs/traffic')
 TRAFFIC_CONFIG_PATH = Path('config/traffic.yaml')
 SLICES_CONFIG_PATH = Path('config/slices.yaml')
 SLICE_PIDS_PATH = Path('config/slice_pids.json')
+UE_PROFILES_PATH = Path('config/ue_profiles.yaml')
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -67,6 +68,75 @@ def load_slice_pids() -> dict[str, int]:
 		return json.load(f)
 
 
+def load_ue_identity() -> tuple[dict[str, str], dict[str, str]]:
+	with open(UE_PROFILES_PATH) as f:
+		config = yaml.safe_load(f)
+	slice_to_imsi = {}
+	slice_to_config_file = {}
+	for ue in config['ue_profiles'].values():
+		slice_to_imsi[ue['slice']] = ue['imsi']
+		slice_to_config_file[ue['slice']] = ue['config_file']
+	return slice_to_imsi, slice_to_config_file
+
+
+def _check_data_pending(imsi: str) -> bool:
+	result = subprocess.run(
+		[
+			'docker',
+			'exec',
+			'ueransim',
+			'/ueransim/nr-cli',
+			f'imsi-{imsi}',
+			'--exec',
+			'ps-list',
+		],
+		capture_output=True,
+		text=True,
+		timeout=5,
+	)
+	return 'data-pending: true' in result.stdout
+
+
+def _recover_ue(imsi: str, config_file: str, iface: str, timeout_sec: int = 30) -> None:
+	subprocess.run(
+		[
+			'docker',
+			'exec',
+			'ueransim',
+			'/ueransim/nr-cli',
+			f'imsi-{imsi}',
+			'--exec',
+			'deregister switch-off',
+		],
+		capture_output=True,
+		timeout=10,
+	)
+	time.sleep(2)
+	subprocess.run(
+		[
+			'docker',
+			'exec',
+			'-d',
+			'ueransim',
+			'/ueransim/nr-ue',
+			'-c',
+			f'/ueransim/config/{config_file}',
+		],
+		capture_output=True,
+		timeout=10,
+	)
+	for _ in range(timeout_sec):
+		check = subprocess.run(
+			['docker', 'exec', 'ueransim', 'ip', 'link', 'show', iface],
+			capture_output=True,
+			timeout=5,
+		)
+		if check.returncode == 0:
+			return
+		time.sleep(1)
+	raise RuntimeError(f'{iface} did not reappear after recovering imsi-{imsi}')
+
+
 def sample_scenario(
 	scenario_name: str,
 	scenario_cfg: dict,
@@ -98,7 +168,11 @@ def sample_scenario(
 	return effective
 
 
-def verify_tunnels(slice_network: dict) -> None:
+def verify_tunnels(
+	slice_network: dict,
+	slice_to_imsi: dict[str, str],
+	slice_to_config_file: dict[str, str],
+) -> None:
 	for slice_name, net in slice_network.items():
 		result = subprocess.run(
 			['docker', 'exec', 'ueransim', 'ip', 'link', 'show', net['tunnel']],
@@ -110,7 +184,8 @@ def verify_tunnels(slice_network: dict) -> None:
 				f'Tunnel {net["tunnel"]} for slice {slice_name} does not exist. '
 				'Ensure UE sessions are attached before starting traffic.'
 			)
-		result = subprocess.run(
+
+		ping_result = subprocess.run(
 			[
 				'docker',
 				'exec',
@@ -127,11 +202,51 @@ def verify_tunnels(slice_network: dict) -> None:
 			capture_output=True,
 			text=True,
 		)
-		if result.returncode != 0:
-			raise RuntimeError(
-				f'Slice {slice_name}: {net["server_ip"]} unreachable via '
-				f'{net["tunnel"]}. Check UPF forwarding and OVS flow rules.'
+
+		if ping_result.returncode != 0:
+			imsi = slice_to_imsi.get(slice_name)
+			config_file = slice_to_config_file.get(slice_name)
+			if imsi is None or config_file is None:
+				raise RuntimeError(
+					f'Slice {slice_name}: {net["server_ip"]} unreachable via '
+					f'{net["tunnel"]}, and no IMSI/config mapping available '
+					'to attempt recovery.'
+				)
+
+			stuck = _check_data_pending(imsi)
+			logger.warning(
+				'Slice %s: %s unreachable via %s (data-pending=%s) -- attempting recovery',
+				slice_name,
+				net['server_ip'],
+				net['tunnel'],
+				stuck,
 			)
+			_recover_ue(imsi, config_file, net['tunnel'])
+
+			retry = subprocess.run(
+				[
+					'docker',
+					'exec',
+					'ueransim',
+					'ping',
+					'-I',
+					net['tunnel'],
+					'-c',
+					'1',
+					'-W',
+					'2',
+					net['server_ip'],
+				],
+				capture_output=True,
+				text=True,
+			)
+			if retry.returncode != 0:
+				raise RuntimeError(
+					f'Slice {slice_name}: {net["server_ip"]} still unreachable '
+					f'via {net["tunnel"]} after recovery attempt.'
+				)
+			logger.info('Slice %s recovered successfully.', slice_name)
+
 	logger.info('All tunnels verified reachable.')
 
 
@@ -568,7 +683,8 @@ def main():
 		return
 
 	slice_pids = load_slice_pids()
-	verify_tunnels(slice_network)
+	slice_to_imsi, slice_to_config_file = load_ue_identity()
+	verify_tunnels(slice_network, slice_to_imsi, slice_to_config_file)
 	start_downlink_servers(slice_network)
 
 	running = True
