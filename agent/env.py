@@ -42,9 +42,11 @@ class CampusSlicingEnv(gym.Env):
 		self.n_slices = len(self.slice_order)
 
 		self._slice_to_ue_config: dict[str, str] = {}
+		self._slice_to_imsi: dict[str, str] = {}
 		if ue_profiles is not None:
 			for ue in ue_profiles['ue_profiles'].values():
 				self._slice_to_ue_config[ue['slice']] = ue['config_file']
+				self._slice_to_imsi[ue['slice']] = ue['imsi']
 
 		self.floors_kbps = [
 			self.slices_cfg[name]['min_throughput_bps'] // 1000 for name in self.slice_order
@@ -61,7 +63,9 @@ class CampusSlicingEnv(gym.Env):
 		}
 
 		self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.n_slices * 3,))
-		self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.n_slices,), dtype=np.float32)
+		self.action_space = spaces.Box(
+			low=-1.0, high=1.0, shape=(self.n_slices,), dtype=np.float32
+		)
 
 		self.episode_length = episode_length
 		self._step_count = 0
@@ -127,6 +131,30 @@ class CampusSlicingEnv(gym.Env):
 			elif latency_ms < 0:
 				raise ValueError(f'negative latency_ms for slice {name!r}: {latency_ms}')
 
+	def _check_tunnel_health(self) -> list[str]:
+		unhealthy = []
+		for name in self.slice_order:
+			imsi = self._slice_to_imsi.get(name)
+			if imsi is None:
+				continue
+			result = subprocess.run(
+				[
+					'docker',
+					'exec',
+					'ueransim',
+					'/ueransim/nr-cli',
+					f'imsi-{imsi}',
+					'--exec',
+					'ps-list',
+				],
+				capture_output=True,
+				text=True,
+				timeout=5,
+			)
+			if 'data-pending: true' in result.stdout:
+				unhealthy.append(name)
+		return unhealthy
+
 	def _check_tunnel_interfaces(self) -> list[str]:
 		missing = []
 		for name in self.slice_order:
@@ -144,6 +172,22 @@ class CampusSlicingEnv(gym.Env):
 		for name in missing:
 			iface = self.slices_cfg[name]['probe_interface']
 			config_file = self._slice_to_ue_config.get(name)
+			imsi = self._slice_to_imsi.get(name)
+			if imsi is not None:
+				subprocess.run(
+					[
+						'docker',
+						'exec',
+						'ueransim',
+						'/ueransim/nr-cli',
+						f'imsi-{imsi}',
+						'--exec',
+						'deregister switch-off',
+					],
+					capture_output=True,
+					timeout=10,
+				)
+				time.sleep(2)
 			assert config_file is not None, (
 				f'no UE config file mapped for slice {name!r} -- '
 				'ue_profiles was not provided or is missing this slice'
@@ -246,8 +290,15 @@ class CampusSlicingEnv(gym.Env):
 
 		try:
 			missing = self._check_tunnel_interfaces()
-			if missing:
-				self._recover_tunnel_interfaces(missing)
+			unhealthy = self._check_tunnel_health()
+			to_recover = list(set(missing) | set(unhealthy))
+			if unhealthy:
+				logger.warning(
+					'Tunnel(s) present but stuck (data-pending) for slices: %s',
+					unhealthy,
+				)
+			if to_recover:
+				self._recover_tunnel_interfaces(to_recover)
 
 			self._current_rates_kbps = self._apply_allocation(EQUAL_SPLIT)
 			self._connect_ws()
