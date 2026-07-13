@@ -17,6 +17,15 @@ from infrastructure.controller import rest_api
 
 logger = logging.getLogger(__name__)
 
+_UE_PROFILES_CONFIG = (
+	Path(__file__).resolve().parents[2] / 'config' / 'ue_profiles.yaml'
+)
+
+_FAILURE_THRESHOLD = 3
+_RECOVERY_SETTLE_SEC = 2
+_RECOVERY_TIMEOUT_SEC = 30
+_MAX_RECOVERY_ATTEMPTS = 3
+
 _TOPOLOGY_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'topology.yaml'
 _SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
 
@@ -55,6 +64,12 @@ class StatsCollector:
 		self._reply_event: threading.Event | None = None
 		# threading.Lock is not safe here; get_stats() may run outside the hub's greenlet pool.
 		self._cache_lock = hub.BoundedSemaphore(1)
+		self._ue_identity: dict | None = None
+		self._consecutive_failures: dict[str, int] = {}
+		self._recovery_in_progress: set[str] = set()
+		self._recovery_outcomes: dict[str, str] = {}
+		self._recovery_attempts: dict[str, int] = {}
+		self._recovery_events: list[dict] = []
 
 	def _get_topology(self) -> dict:
 		if self._topology is None:
@@ -67,6 +82,108 @@ class StatsCollector:
 			with open(self._slices_config) as f:
 				self._slices = yaml.safe_load(f)
 		return self._slices
+
+	def _get_ue_identity(self) -> dict[str, dict]:
+		if self._ue_identity is None:
+			with open(_UE_PROFILES_CONFIG) as f:
+				config = yaml.safe_load(f)
+			self._ue_identity = {
+				ue['slice']: {'imsi': ue['imsi'], 'config_file': ue['config_file']}
+				for ue in config['ue_profiles'].values()
+			}
+		return self._ue_identity
+
+	def _check_data_pending(self, imsi: str) -> str:
+		try:
+			result = subprocess.run(
+				[
+					'docker',
+					'exec',
+					'ueransim',
+					'/ueransim/nr-cli',
+					f'imsi-{imsi}',
+					'--exec',
+					'ps-list',
+				],
+				capture_output=True,
+				text=True,
+				timeout=5,
+			)
+			if result.returncode != 0:
+				return 'check_failed'
+			return 'stuck' if 'data-pending: true' in result.stdout else 'healthy'
+		except Exception:
+			return 'check_failed'
+
+	def _recover_slice(
+		self, slice_name: str, imsi: str, config_file: str, probe_interface: str
+	) -> None:
+		try:
+			subprocess.run(
+				[
+					'docker',
+					'exec',
+					'ueransim',
+					'/ueransim/nr-cli',
+					f'imsi-{imsi}',
+					'--exec',
+					'deregister switch-off',
+				],
+				capture_output=True,
+				timeout=10,
+			)
+			subprocess.run(
+				['docker', 'exec', 'ueransim', 'pkill', '-f', config_file],
+				capture_output=True,
+			)
+			hub.sleep(_RECOVERY_SETTLE_SEC)
+			subprocess.run(
+				[
+					'docker',
+					'exec',
+					'-d',
+					'ueransim',
+					'/ueransim/nr-ue',
+					'-c',
+					f'/ueransim/config/{config_file}',
+				],
+				capture_output=True,
+				timeout=10,
+			)
+
+			recovered = False
+			for _ in range(_RECOVERY_TIMEOUT_SEC):
+				check = subprocess.run(
+					['docker', 'exec', 'ueransim', 'ip', 'link', 'show', probe_interface],
+					capture_output=True,
+					timeout=5,
+				)
+				if check.returncode == 0:
+					recovered = True
+					break
+				hub.sleep(1)
+
+			if recovered:
+				self._recovery_outcomes[slice_name] = 'recovered'
+				self._consecutive_failures[slice_name] = 0
+				self._recovery_attempts[slice_name] = 0
+			else:
+				self._recovery_outcomes[slice_name] = (
+					f'timed out (attempt {self._recovery_attempts.get(slice_name, 0)}/{_MAX_RECOVERY_ATTEMPTS})'
+				)
+				# not resetting consecutive_failures on failure; prevents
+				# a non-transient fault from producing infinite retries
+		except Exception as exc:
+			self._recovery_outcomes[slice_name] = f'error: {exc}'
+		finally:
+			self._recovery_in_progress.discard(slice_name)
+			self._recovery_events.append(
+				{
+					'slice': slice_name,
+					'timestamp': time.time(),
+					'outcome': self._recovery_outcomes.get(slice_name, 'unknown'),
+				}
+			)
 
 	def register_datapath(self, switch_name: str, datapath: object) -> None:
 		self._datapaths[switch_name] = datapath
@@ -227,7 +344,7 @@ class StatsCollector:
 			loss_match = _LOSS_RE.search(output)
 			# Divide by 2: ping reports round-trip, state space requires one-way.
 			latency_ms = float(rtt_match.group(1)) / 2.0 if rtt_match else None
-			loss_pct = float(loss_match.group(1)) if loss_match else None
+			loss_pct = float(loss_match.group(1)) if loss_match else 100.0
 			results[slice_name] = {
 				'latency_ms': latency_ms,
 				'loss_pct': loss_pct,
@@ -287,12 +404,79 @@ class StatsCollector:
 				probe['error'],
 			)
 
+		for slice_name, outcome in list(self._recovery_outcomes.items()):
+			logger.warning('Stats collector: recovery for slice %s: %s', slice_name, outcome)
+			del self._recovery_outcomes[slice_name]
+
+		ue_identity = self._get_ue_identity()
+		for slice_name, probe in probe_results.items():
+			is_failure = probe['loss_pct'] == 100.0 or probe['error'] is not None
+			self._consecutive_failures[slice_name] = (
+				self._consecutive_failures.get(slice_name, 0) + 1 if is_failure else 0
+			)
+
+			if (
+				self._consecutive_failures.get(slice_name, 0) < _FAILURE_THRESHOLD
+				or slice_name in self._recovery_in_progress
+			):
+				continue
+
+			attempts = self._recovery_attempts.get(slice_name, 0)
+			if attempts >= _MAX_RECOVERY_ATTEMPTS:
+				logger.error(
+					'Stats collector: slice %s exceeded %d recovery attempts -- giving up, manual intervention required',
+					slice_name,
+					_MAX_RECOVERY_ATTEMPTS,
+				)
+				continue
+
+			identity = ue_identity.get(slice_name)
+			if identity is None:
+				continue
+
+			status = self._check_data_pending(identity['imsi'])
+			if status == 'check_failed':
+				if attempts >= 1:
+					logger.error(
+						'Stats collector: slice %s health check failed after a prior '
+						'recovery attempt -- treating as unrecoverable, manual intervention required',
+						slice_name,
+					)
+					self._recovery_attempts[slice_name] = _MAX_RECOVERY_ATTEMPTS
+				else:
+					logger.warning(
+						'Stats collector: health check failed for slice %s -- will retry next cycle',
+						slice_name,
+					)
+				continue
+			if status == 'healthy':
+				continue
+
+			logger.warning(
+				'Stats collector: slice %s stuck (data-pending) after %d consecutive failures, attempt %d/%d',
+				slice_name,
+				self._consecutive_failures[slice_name],
+				attempts + 1,
+				_MAX_RECOVERY_ATTEMPTS,
+			)
+			self._recovery_in_progress.add(slice_name)
+			self._recovery_attempts[slice_name] = attempts + 1
+			probe_interface = slices_cfg[slice_name]['probe_interface']
+			hub.spawn(
+				self._recover_slice,
+				slice_name,
+				identity['imsi'],
+				identity['config_file'],
+				probe_interface,
+			)
+
 		with self._cache_lock:
 			for slice_name, probe in probe_results.items():
 				self._stats_cache[slice_name] = {
 					'tx_throughput_bps': self._pending_throughput.get(slice_name, 0.0),
 					'latency_ms': probe['latency_ms'],
 					'loss_pct': probe['loss_pct'],
+					'recovering': slice_name in self._recovery_in_progress,
 				}
 			snapshot = {
 				slice_name: dict(metrics) for slice_name, metrics in self._stats_cache.items()

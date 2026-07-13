@@ -13,11 +13,13 @@ import signal
 import subprocess
 import threading
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
+CONTROLLER_HEALTH_URL = 'http://localhost:8080/health'
 LOG_DIR = Path('logs/traffic')
 TRAFFIC_CONFIG_PATH = Path('config/traffic.yaml')
 SLICES_CONFIG_PATH = Path('config/slices.yaml')
@@ -97,6 +99,41 @@ def _check_data_pending(imsi: str) -> bool:
 	return 'data-pending: true' in result.stdout
 
 
+def _controller_owns_recovery() -> bool:
+	try:
+		with urllib.request.urlopen(CONTROLLER_HEALTH_URL, timeout=2) as resp:
+			return bool(json.loads(resp.read()).get('registry_frozen'))
+	except Exception:
+		return False
+
+
+def _wait_for_slice_recovery(
+	net: dict, timeout_sec: int = 60, poll_sec: int = 2
+) -> bool:
+	deadline = time.monotonic() + timeout_sec
+	while time.monotonic() < deadline:
+		result = subprocess.run(
+			[
+				'docker',
+				'exec',
+				'ueransim',
+				'ping',
+				'-I',
+				net['tunnel'],
+				'-c',
+				'1',
+				'-W',
+				'2',
+				net['server_ip'],
+			],
+			capture_output=True,
+		)
+		if result.returncode == 0:
+			return True
+		time.sleep(poll_sec)
+	return False
+
+
 def _recover_ue(imsi: str, config_file: str, iface: str, timeout_sec: int = 30) -> None:
 	subprocess.run(
 		[
@@ -173,6 +210,10 @@ def verify_tunnels(
 	slice_to_imsi: dict[str, str],
 	slice_to_config_file: dict[str, str],
 ) -> None:
+	controller_owns_recovery = _controller_owns_recovery()
+	if controller_owns_recovery:
+		logger.info('Controller detected -- deferring tunnel recovery to stats_collector')
+
 	for slice_name, net in slice_network.items():
 		result = subprocess.run(
 			['docker', 'exec', 'ueransim', 'ip', 'link', 'show', net['tunnel']],
@@ -204,6 +245,15 @@ def verify_tunnels(
 		)
 
 		if ping_result.returncode != 0:
+			if controller_owns_recovery:
+				if not _wait_for_slice_recovery(net):
+					raise RuntimeError(
+						f'Slice {slice_name}: {net["server_ip"]} unreachable via '
+						f'{net["tunnel"]} and controller recovery did not clear it in time.'
+					)
+				logger.info('Slice %s recovered by controller.', slice_name)
+				continue
+
 			imsi = slice_to_imsi.get(slice_name)
 			config_file = slice_to_config_file.get(slice_name)
 			if imsi is None or config_file is None:
