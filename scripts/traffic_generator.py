@@ -146,7 +146,7 @@ def start_downlink_servers(slice_network: dict) -> None:
 		# -B is required: without it iperf3 replies via the container default
 		# route instead of the GTP tunnel, breaking the downlink data path.
 		loop_cmd = (
-			f'while true; do iperf3 -s -1 -B {net["ue_ip"]} -p {net["dl_port"]} '
+			f'while true; do timeout 90s iperf3 -s -1 -B {net["ue_ip"]} -p {net["dl_port"]} '
 			f'--logfile /tmp/iperf3-{net["tunnel"]}-dl.log; done'
 		)
 		cmd = ['docker', 'exec', '-d', 'ueransim', 'bash', '-c', loop_cmd]

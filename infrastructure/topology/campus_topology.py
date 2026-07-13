@@ -158,21 +158,23 @@ def create_topology():
 	info('*** Starting iperf3 servers\n')
 
 	def start_iperf3_loop(node, port, logfile):
-		# -D can wedge permanently after an abnormal client disconnect
-		# (esnet/iperf#416, #1735); -1 + respawn avoids that entirely.
+		# -1 avoids the abnormal-disconnect wedge (esnet/iperf#416), but the
+		# server can still hang while printing its report after a completed
+		# transfer (esnet/iperf#1735, unresolved upstream) -- timeout forces
+		# a kill so the loop can respawn instead of staying stuck.
 		cmd = (
-			f'while true; do iperf3 -s -1 -p {port} --logfile {logfile}; '
+			f'while true; do timeout 90s iperf3 -s -1 -p {port} --logfile {logfile}; '
 			f'done > /dev/null 2>&1 &'
 		)
 		node.cmd(cmd)
 
-	sta1.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta1-5201.log')
-	sta1.cmd('iperf3 -s -p 5202 -D --logfile /tmp/iperf3-sta1-5202.log')
-	sta3.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta3-5201.log')
-	sta3.cmd('iperf3 -s -p 5202 -D --logfile /tmp/iperf3-sta3-5202.log')
-	sta5.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta5.log')
-	sta7.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta7.log')
-	sta9.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta9.log')
+	start_iperf3_loop(sta1, 5201, '/tmp/iperf3-sta1-5201.log')
+	start_iperf3_loop(sta1, 5202, '/tmp/iperf3-sta1-5202.log')
+	start_iperf3_loop(sta3, 5201, '/tmp/iperf3-sta3-5201.log')
+	start_iperf3_loop(sta3, 5202, '/tmp/iperf3-sta3-5202.log')
+	start_iperf3_loop(sta5, 5201, '/tmp/iperf3-sta5.log')
+	start_iperf3_loop(sta7, 5201, '/tmp/iperf3-sta7.log')
+	start_iperf3_loop(sta9, 5201, '/tmp/iperf3-sta9.log')
 
 	slice_sta_pids = {
 		'vle': sta1.pid,
