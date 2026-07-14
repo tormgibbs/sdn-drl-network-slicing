@@ -139,8 +139,8 @@ configuration:
   nrfUri: http://nrf.free5gc.org:8000
   nrfCertPem: cert/nrf.pem
   urrPeriod: 10
-  urrThreshold: 1000
-  requestedUnit: 1000
+  urrThreshold: 150000000
+  requestedUnit: 150000000
   metrics:
     enable: false
     scheme: http
