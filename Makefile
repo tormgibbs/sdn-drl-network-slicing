@@ -98,6 +98,11 @@ ue-setup:
 		done; \
 		echo "    $$ue ready"; \
 	done
+	docker exec ueransim ip addr change 10.60.1.1/24 dev ue1tun0
+	docker exec ueransim ip addr change 10.60.2.1/24 dev ue2tun0
+	docker exec ueransim ip addr change 10.60.3.1/24 dev ue3tun0
+	docker exec ueransim ip addr change 10.60.4.1/24 dev ue4tun0
+	docker exec ueransim ip addr change 10.60.5.1/24 dev ue5tun0
 	docker exec ueransim ip route add 10.0.0.0/8 dev ue1tun0 2>/dev/null || true
 	docker exec ueransim ip route add 10.0.2.0/24 dev ue2tun0 2>/dev/null || true
 	docker exec ueransim ip route add 10.0.3.0/24 dev ue3tun0 2>/dev/null || true

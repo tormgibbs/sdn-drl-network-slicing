@@ -7,6 +7,7 @@ opType: "OPC"
 amf: "8000"
 imei: "356938035643801"
 imeiSv: "4370816125816151"
+tunNetmask: '255.255.255.0'
 
 gnbSearchList:
   - 127.0.0.1
@@ -29,7 +30,6 @@ sessions:
     slice:
       sst: 0x01
       sd: 0x000001
-    tunPrefix: 24
 
 configured-nssai:
   - sst: 0x01
