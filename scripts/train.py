@@ -16,7 +16,7 @@ from stable_baselines3.common.monitor import Monitor
 from agent.env import CampusSlicingEnv
 
 SLICES_CONFIG_PATH = 'config/slices.yaml'
-MODEL_DIR = Path('models')
+MODELS_ROOT = Path('models')
 LOG_DIR = Path('logs/tensorboard')
 MONITOR_DIR = Path('logs/monitor')
 
@@ -131,7 +131,15 @@ def main() -> int:
 	parser.add_argument('--instrument', action='store_true')
 	parser.add_argument('--resume', action='store_true')
 	parser.add_argument('--checkpoint-every-n-rollouts', type=int, default=1)
+	parser.add_argument(
+		'--run-name',
+		type=str,
+		default=time.strftime('%Y%m%d_%H%M%S'),
+		help='Subdirectory under models/ for this run. Pass the same value '
+		'with --resume to continue a specific prior run.',
+	)
 	args = parser.parse_args()
+	model_dir = MODELS_ROOT / args.run_name
 
 	env = make_env()
 	env.reset(seed=SEED)
@@ -154,7 +162,7 @@ def main() -> int:
 		'[space-check] action_space and observation_space have finite, well-formed bounds.'
 	)
 
-	resume_path = MODEL_DIR / 'latest.zip' if args.resume else None
+	resume_path = model_dir / 'latest.zip' if args.resume else None
 	if args.resume and not resume_path.exists():
 		raise FileNotFoundError(f'--resume given but {resume_path} does not exist')
 
@@ -166,13 +174,13 @@ def main() -> int:
 		TimingCallback(verbose=1),
 		AtomicCheckpointCallback(
 			save_every_n_rollouts=args.checkpoint_every_n_rollouts,
-			save_dir=MODEL_DIR,
+			save_dir=model_dir,
 			verbose=1,
 		),
 	]
 
 	print(
-		f'Training: total_timesteps={total_timesteps} n_steps={args.n_steps} instrument={args.instrument} resume={args.resume}'
+		f'Training: run_name={args.run_name} total_timesteps={total_timesteps} n_steps={args.n_steps} instrument={args.instrument} resume={args.resume}'
 	)
 	model.learn(
 		total_timesteps=total_timesteps,
@@ -180,7 +188,7 @@ def main() -> int:
 		reset_num_timesteps=not args.resume,
 	)
 
-	final_path = MODEL_DIR / 'final.zip'
+	final_path = model_dir / 'final.zip'
 	_atomic_save(model, final_path)
 	print(f'Training complete. Final model saved to {final_path}')
 	return 0
