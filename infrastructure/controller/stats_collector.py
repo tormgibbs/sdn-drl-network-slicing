@@ -57,12 +57,11 @@ class StatsCollector:
 		self._running = False
 		self._topology: dict | None = None
 		self._slices: dict | None = None
-		# Shared between handle_port_stats_reply and _run_probe_cycle, safe
-		# because both run in the same hub greenlet context.
 		self._pending_throughput: dict[str, float] = {}
 		self._reply_count: int = 0
 		self._reply_event: threading.Event | None = None
-		# threading.Lock is not safe here; get_stats() may run outside the hub's greenlet pool.
+		# HUB_TYPE=native: hub.spawn produces real OS threads, not eventlet
+		# greenlets. All recovery/failure-tracking state must go through this lock.
 		self._cache_lock = hub.BoundedSemaphore(1)
 		self._ue_identity: dict | None = None
 		self._consecutive_failures: dict[str, int] = {}
@@ -150,7 +149,6 @@ class StatsCollector:
 				capture_output=True,
 				timeout=10,
 			)
-
 			recovered = False
 			for _ in range(_RECOVERY_TIMEOUT_SEC):
 				check = subprocess.run(
@@ -164,24 +162,30 @@ class StatsCollector:
 				hub.sleep(1)
 
 			if recovered:
-				self._recovery_outcomes[slice_name] = 'recovered'
-				self._consecutive_failures[slice_name] = 0
-				self._recovery_attempts[slice_name] = 0
+				with self._cache_lock:
+					self._recovery_outcomes[slice_name] = 'recovered'
+					self._consecutive_failures[slice_name] = 0
+					self._recovery_attempts[slice_name] = 0
 			else:
-				self._recovery_outcomes[slice_name] = (
-					f'timed out (attempt {self._recovery_attempts.get(slice_name, 0)}/{_MAX_RECOVERY_ATTEMPTS})'
-				)
+				with self._cache_lock:
+					attempts_so_far = self._recovery_attempts.get(slice_name, 0)
+					self._recovery_outcomes[slice_name] = (
+						f'timed out (attempt {attempts_so_far}/{_MAX_RECOVERY_ATTEMPTS})'
+					)
 				# not resetting consecutive_failures on failure; prevents
 				# a non-transient fault from producing infinite retries
 		except Exception as exc:
-			self._recovery_outcomes[slice_name] = f'error: {exc}'
+			with self._cache_lock:
+				self._recovery_outcomes[slice_name] = f'error: {exc}'
 		finally:
-			self._recovery_in_progress.discard(slice_name)
+			with self._cache_lock:
+				self._recovery_in_progress.discard(slice_name)
+				outcome = self._recovery_outcomes.get(slice_name, 'unknown')
 			self._recovery_events.append(
 				{
 					'slice': slice_name,
 					'timestamp': time.time(),
-					'outcome': self._recovery_outcomes.get(slice_name, 'unknown'),
+					'outcome': outcome,
 				}
 			)
 
@@ -211,7 +215,8 @@ class StatsCollector:
 		while self._running:
 			try:
 				cycle_start = time.time()
-				self._pending_throughput.clear()
+				with self._cache_lock:
+					self._pending_throughput.clear()
 				self._reply_count = 0
 				self._reply_event = threading.Event()
 
@@ -221,9 +226,11 @@ class StatsCollector:
 					timeout=min(_OFP_REPLY_WAIT_SEC, self._interval_sec * 0.2)
 				)
 				if not fired:
+					with self._cache_lock:
+						reply_count = self._reply_count
 					logger.warning(
 						'Stats collector: only %d/%d OFP replies received',
-						self._reply_count,
+						reply_count,
 						_EXPECTED_REPLIES,
 					)
 
@@ -299,12 +306,15 @@ class StatsCollector:
 			elapsed = now - prev_time
 			port_tx_bps = ((stat.tx_bytes - prev_tx) * 8) / elapsed if elapsed > 0 else 0.0
 
-			self._pending_throughput[slice_name] = self._pending_throughput.get(
-				slice_name, 0.0
-			) + max(0.0, port_tx_bps)
+			with self._cache_lock:
+				self._pending_throughput[slice_name] = self._pending_throughput.get(
+					slice_name, 0.0
+				) + max(0.0, port_tx_bps)
 
-		self._reply_count += 1
-		if self._reply_count >= _EXPECTED_REPLIES:
+		with self._cache_lock:
+			self._reply_count += 1
+			reply_count = self._reply_count
+		if reply_count >= _EXPECTED_REPLIES:
 			logger.debug('Stats collector: all OFP replies received')
 			if self._reply_event is not None:
 				self._reply_event.set()
@@ -316,8 +326,8 @@ class StatsCollector:
 		sink_ip: str,
 		probe_interface: str,
 	) -> None:
-		# subprocess is monkey-patched by eventlet so this yields cooperatively.
-		# No logging inside this method; logging mutexes are not greenlet-safe.
+		# No logging inside this method to avoid lock contention on logging's
+		# internal lock across many concurrent probes.
 		try:
 			result = subprocess.run(
 				[
@@ -404,24 +414,28 @@ class StatsCollector:
 				probe['error'],
 			)
 
-		for slice_name, outcome in list(self._recovery_outcomes.items()):
+		with self._cache_lock:
+			outcomes_to_log = list(self._recovery_outcomes.items())
+			for slice_name, _ in outcomes_to_log:
+				del self._recovery_outcomes[slice_name]
+		for slice_name, outcome in outcomes_to_log:
 			logger.warning('Stats collector: recovery for slice %s: %s', slice_name, outcome)
-			del self._recovery_outcomes[slice_name]
 
 		ue_identity = self._get_ue_identity()
 		for slice_name, probe in probe_results.items():
 			is_failure = probe['loss_pct'] == 100.0 or probe['error'] is not None
-			self._consecutive_failures[slice_name] = (
-				self._consecutive_failures.get(slice_name, 0) + 1 if is_failure else 0
-			)
 
-			if (
-				self._consecutive_failures.get(slice_name, 0) < _FAILURE_THRESHOLD
-				or slice_name in self._recovery_in_progress
-			):
+			with self._cache_lock:
+				self._consecutive_failures[slice_name] = (
+					self._consecutive_failures.get(slice_name, 0) + 1 if is_failure else 0
+				)
+				failures = self._consecutive_failures[slice_name]
+				in_progress = slice_name in self._recovery_in_progress
+				attempts = self._recovery_attempts.get(slice_name, 0)
+
+			if failures < _FAILURE_THRESHOLD or in_progress:
 				continue
 
-			attempts = self._recovery_attempts.get(slice_name, 0)
 			if attempts >= _MAX_RECOVERY_ATTEMPTS:
 				logger.error(
 					'Stats collector: slice %s exceeded %d recovery attempts -- giving up, manual intervention required',
@@ -442,7 +456,8 @@ class StatsCollector:
 						'recovery attempt -- treating as unrecoverable, manual intervention required',
 						slice_name,
 					)
-					self._recovery_attempts[slice_name] = _MAX_RECOVERY_ATTEMPTS
+					with self._cache_lock:
+						self._recovery_attempts[slice_name] = _MAX_RECOVERY_ATTEMPTS
 				else:
 					logger.warning(
 						'Stats collector: health check failed for slice %s -- will retry next cycle',
@@ -452,15 +467,20 @@ class StatsCollector:
 			if status == 'healthy':
 				continue
 
+			with self._cache_lock:
+				if slice_name in self._recovery_in_progress:
+					continue
+				self._recovery_in_progress.add(slice_name)
+				attempts = self._recovery_attempts.get(slice_name, 0)
+				self._recovery_attempts[slice_name] = attempts + 1
+
 			logger.warning(
 				'Stats collector: slice %s stuck (data-pending) after %d consecutive failures, attempt %d/%d',
 				slice_name,
-				self._consecutive_failures[slice_name],
+				failures,
 				attempts + 1,
 				_MAX_RECOVERY_ATTEMPTS,
 			)
-			self._recovery_in_progress.add(slice_name)
-			self._recovery_attempts[slice_name] = attempts + 1
 			probe_interface = slices_cfg[slice_name]['probe_interface']
 			hub.spawn(
 				self._recover_slice,
