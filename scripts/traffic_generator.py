@@ -411,6 +411,9 @@ def _run_iperf3_downlink(
 	# Mininet-WiFi stations don't have named namespaces in /var/run/netns/,
 	# so nsenter by PID is the only way in.
 	cmd = [
+		'nice',
+		'-n',
+		'10',
 		'nsenter',
 		'-t',
 		str(sta_pid),
