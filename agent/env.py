@@ -172,17 +172,17 @@ class CampusSlicingEnv(gym.Env):
 	def _recovering_flags(self, metrics: dict) -> dict[str, bool]:
 		return {name: metrics[name].get('recovering', False) for name in self.slice_order}
 
-	def _compute_reward(self, metrics: dict) -> float:
+	def _compute_reward(self, metrics: dict, active_names: list[str]) -> float:
 		self._assert_rates_valid()
 
-		n = self.n_slices
+		n_active = len(active_names)
 		r_sla = 0.0
 		p_latency = 0.0
 		p_loss = 0.0
 		r_util_sum = 0.0
 		fairness_ratios = []
 
-		for name in self.slice_order:
+		for name in active_names:
 			m = metrics[name]
 			cfg = self.slices_cfg[name]
 			si = cfg['priority']
@@ -207,11 +207,11 @@ class CampusSlicingEnv(gym.Env):
 
 			fairness_ratios.append(self._current_rates_kbps[name] / si)
 
-		r_util = r_util_sum / n
+		r_util = r_util_sum / n_active
 
 		sum_ratios = sum(fairness_ratios)
 		sum_sq_ratios = sum(r**2 for r in fairness_ratios)
-		p_fairness = 1.0 - (sum_ratios**2) / (n * sum_sq_ratios)
+		p_fairness = 1.0 - (sum_ratios**2) / (n_active * sum_sq_ratios)
 
 		return W1 * r_sla - W2 * p_latency - W3 * p_loss + W4 * r_util - W5 * p_fairness
 
@@ -261,8 +261,29 @@ class CampusSlicingEnv(gym.Env):
 			self._step_count += 1
 			return self._last_obs, 0.0, False, True, {'failure': str(exc)}
 
+		active_names = [
+			n for n in self.slice_order if not metrics[n].get('giving_up', False)
+		]
+
+		if not active_names:
+			logger.critical(
+				'All slices in giving_up state -- terminating episode, '
+				'no active infrastructure to compute reward against'
+			)
+			self._step_count += 1
+			return (
+				self._last_obs,
+				0.0,
+				True,
+				False,
+				{
+					'failure': 'all_slices_giving_up',
+					'recovering': self._recovering_flags(metrics),
+				},
+			)
+
 		obs = self._build_observation(metrics)
-		reward = self._compute_reward(metrics)
+		reward = self._compute_reward(metrics, active_names)
 		self._last_obs = obs
 
 		self._step_count += 1

@@ -42,6 +42,8 @@ _LOSS_RE = re.compile(r'(\d+)% packet loss')
 _EXPECTED_REPLIES = 2
 _OFP_REPLY_WAIT_SEC = 1.0
 
+_GIVING_UP_CLEAR_STREAK = 3
+
 
 class StatsCollector:
 	def __init__(
@@ -72,6 +74,9 @@ class StatsCollector:
 		self._recovery_outcomes: dict[str, str] = {}
 		self._recovery_attempts: dict[str, int] = {}
 		self._recovery_events: list[dict] = []
+		self._recovery_events: list[dict] = []
+		self._giving_up: set[str] = set()
+		self._healthy_streak: dict[str, int] = {}
 
 	def _get_topology(self) -> dict:
 		if self._topology is None:
@@ -461,6 +466,46 @@ class StatsCollector:
 			is_failure = probe['loss_pct'] == 100.0 or probe['error'] is not None
 
 			with self._cache_lock:
+				already_given_up = slice_name in self._giving_up
+
+			if already_given_up:
+				identity = ue_identity.get(slice_name)
+				ping_ok = probe['loss_pct'] != 100.0
+				data_status = (
+					self._check_data_pending(identity['imsi']) if (ping_ok and identity) else None
+				)
+				fully_healthy = ping_ok and data_status == 'healthy'
+
+				with self._cache_lock:
+					if fully_healthy:
+						self._healthy_streak[slice_name] = (
+							self._healthy_streak.get(slice_name, 0) + 1
+						)
+						streak = self._healthy_streak[slice_name]
+						if streak >= _GIVING_UP_CLEAR_STREAK:
+							self._giving_up.discard(slice_name)
+							self._healthy_streak[slice_name] = 0
+							self._consecutive_failures[slice_name] = 0
+							self._recovery_attempts[slice_name] = 0
+							logger.warning(
+								'Stats collector: slice %s cleared giving_up after '
+								'%d consecutive healthy polls',
+								slice_name,
+								streak,
+							)
+					else:
+						self._healthy_streak[slice_name] = 0
+					streak_snapshot = self._healthy_streak.get(slice_name, 0)
+
+				logger.debug(
+					'Stats collector: slice %s still in giving_up (healthy_streak=%d/%d)',
+					slice_name,
+					streak_snapshot,
+					_GIVING_UP_CLEAR_STREAK,
+				)
+				continue
+
+			with self._cache_lock:
 				self._consecutive_failures[slice_name] = (
 					self._consecutive_failures.get(slice_name, 0) + 1 if is_failure else 0
 				)
@@ -477,6 +522,8 @@ class StatsCollector:
 					slice_name,
 					_MAX_RECOVERY_ATTEMPTS,
 				)
+				with self._cache_lock:
+					self._giving_up.add(slice_name)
 				continue
 
 			identity = ue_identity.get(slice_name)
@@ -488,6 +535,8 @@ class StatsCollector:
 				with self._cache_lock:
 					self._recovery_attempts[slice_name] = attempts + 1
 					escalated = self._recovery_attempts[slice_name] >= _MAX_RECOVERY_ATTEMPTS
+					if escalated:
+						self._giving_up.add(slice_name)
 				if escalated:
 					logger.error(
 						'Stats collector: slice %s exceeded %d check-failed retries -- '
@@ -534,6 +583,7 @@ class StatsCollector:
 					'latency_ms': probe['latency_ms'],
 					'loss_pct': probe['loss_pct'],
 					'recovering': slice_name in self._recovery_in_progress,
+					'giving_up': slice_name in self._giving_up,
 				}
 			snapshot = {
 				slice_name: dict(metrics) for slice_name, metrics in self._stats_cache.items()
