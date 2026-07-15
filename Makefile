@@ -1,4 +1,4 @@
-.PHONY: topology clean-topology core-up core-down core-status controller module-load test ue-attach ue-status network-setup ue-setup up down traffic-start traffic-stop ue-detach smf-restart soak-init controller-soak traffic-soak
+.PHONY: topology clean-topology core-up core-down core-status controller module-load test ue-attach ue-status network-setup ue-setup up down traffic-start traffic-stop ue-detach smf-restart soak-init controller-soak traffic-soak soak-stop-traffic soak-stop-controller soak-stop-all
 
 LOOPS ?= 100
 	
@@ -146,3 +146,13 @@ controller-soak:
 traffic-soak:
 	@test -n "$(RUN_DIR)" || (echo "RUN_DIR not set -- run 'make soak-init' first and export RUN_DIR" && exit 1)
 	sudo $(shell which uv) run scripts/traffic_generator.py --loops $(LOOPS) 2>&1 | tee "$(RUN_DIR)/traffic_soak.log"
+
+soak-stop-traffic:
+	sudo pkill -9 -f traffic_generator.py || true
+	@echo "traffic_generator.py stopped (or was not running)"
+
+soak-stop-controller:
+	sudo pkill -9 -f "infrastructure/controller/run.py" || true
+	@echo "controller stopped (or was not running)"
+
+soak-stop-all: soak-stop-traffic soak-stop-controller
