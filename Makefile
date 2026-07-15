@@ -1,5 +1,7 @@
-.PHONY: topology clean-topology core-up core-down core-status controller module-load test ue-attach ue-status network-setup ue-setup up down traffic-start traffic-stop ue-detach smf-restart
+.PHONY: topology clean-topology core-up core-down core-status controller module-load test ue-attach ue-status network-setup ue-setup up down traffic-start traffic-stop ue-detach smf-restart soak-init controller-soak traffic-soak
 
+LOOPS ?= 100
+	
 topology:
 	sudo python3 infrastructure/topology/campus_topology.py
 
@@ -129,3 +131,18 @@ traffic-start:
 
 traffic-stop:
 	pkill -f traffic_generator.py || true
+
+soak-init:
+	@RUN_DIR=logs/soak_run_$$(date +%Y%m%d_%H%M); \
+	mkdir -p $$RUN_DIR; \
+	echo "Created $$RUN_DIR"; \
+	echo "Run: export RUN_DIR=$$RUN_DIR"
+
+controller-soak:
+	@test -n "$(RUN_DIR)" || (echo "RUN_DIR not set -- run 'make soak-init' first and export RUN_DIR" && exit 1)
+	mkdir -p logs
+	sudo $(shell which uv) run infrastructure/controller/run.py 2>&1 | tee "$(RUN_DIR)/controller_soak.log"
+
+traffic-soak:
+	@test -n "$(RUN_DIR)" || (echo "RUN_DIR not set -- run 'make soak-init' first and export RUN_DIR" && exit 1)
+	sudo $(shell which uv) run scripts/traffic_generator.py --loops $(LOOPS) 2>&1 | tee "$(RUN_DIR)/traffic_soak.log"
