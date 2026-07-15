@@ -189,12 +189,18 @@ class CampusSlicingEnv(gym.Env):
 			Li = cfg['max_latency_ms']
 			Loss_i = cfg['max_loss_pct']
 
-			latency_i = m['latency_ms'] if m['latency_ms'] is not None else Li
 			loss_i = m['loss_pct']
+			if m['latency_ms'] is None:
+				latency_ms_ok = False
+				p_latency += (
+					si * 1.0
+				)  # max penalty: slice unreachable, no latency signal available
+			else:
+				latency_ms_ok = m['latency_ms'] <= Li
+				p_latency += si * max(0.0, (m['latency_ms'] - Li) / Li)
 
-			sla_met = latency_i <= Li and loss_i <= Loss_i
+			sla_met = latency_ms_ok and loss_i <= Loss_i
 			r_sla += si * (1.0 if sla_met else 0.0)
-			p_latency += si * max(0.0, (latency_i - Li) / Li)
 			p_loss += si * loss_i
 
 			r_util_sum += self._utilisation(name, metrics)
