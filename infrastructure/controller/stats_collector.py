@@ -485,14 +485,16 @@ class StatsCollector:
 
 			status = self._check_data_pending(identity['imsi'])
 			if status == 'check_failed':
-				if attempts >= 1:
+				with self._cache_lock:
+					self._recovery_attempts[slice_name] = attempts + 1
+					escalated = self._recovery_attempts[slice_name] >= _MAX_RECOVERY_ATTEMPTS
+				if escalated:
 					logger.error(
-						'Stats collector: slice %s health check failed after a prior '
-						'recovery attempt -- treating as unrecoverable, manual intervention required',
+						'Stats collector: slice %s exceeded %d check-failed retries -- '
+						'giving up, manual intervention required',
 						slice_name,
+						_MAX_RECOVERY_ATTEMPTS,
 					)
-					with self._cache_lock:
-						self._recovery_attempts[slice_name] = _MAX_RECOVERY_ATTEMPTS
 				else:
 					logger.warning(
 						'Stats collector: health check failed for slice %s -- will retry next cycle',
