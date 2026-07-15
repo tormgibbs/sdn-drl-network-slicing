@@ -21,6 +21,9 @@ _UE_PROFILES_CONFIG = (
 	Path(__file__).resolve().parents[2] / 'config' / 'ue_profiles.yaml'
 )
 
+_RELEASE_CONFIRM_TIMEOUT_SEC = 15
+_RELEASE_POLL_INTERVAL_SEC = 1
+
 _FAILURE_THRESHOLD = 3
 _RECOVERY_SETTLE_SEC = 2
 _RECOVERY_TIMEOUT_SEC = 30
@@ -114,10 +117,31 @@ class StatsCollector:
 		except Exception:
 			return 'check_failed'
 
+	def _wait_for_smf_release(self, imsi: str, wait_start_ts: float) -> bool:
+		deadline = time.time() + _RELEASE_CONFIRM_TIMEOUT_SEC
+		since_arg = str(int(wait_start_ts))
+		while time.time() < deadline:
+			try:
+				result = subprocess.run(
+					['docker', 'logs', '--since', since_arg, 'smf'],
+					capture_output=True,
+					text=True,
+					timeout=5,
+				)
+			except Exception:
+				hub.sleep(_RELEASE_POLL_INTERVAL_SEC)
+				continue
+			for line in result.stdout.splitlines():
+				if f'imsi-{imsi}' in line and 'Release IP' in line:
+					return True
+			hub.sleep(_RELEASE_POLL_INTERVAL_SEC)
+		return False
+
 	def _recover_slice(
 		self, slice_name: str, imsi: str, config_file: str, probe_interface: str
 	) -> None:
 		try:
+			wait_start_ts = time.time()
 			subprocess.run(
 				[
 					'docker',
@@ -131,6 +155,17 @@ class StatsCollector:
 				capture_output=True,
 				timeout=10,
 			)
+
+			released = self._wait_for_smf_release(imsi, wait_start_ts)
+			if not released:
+				with self._cache_lock:
+					self._recovery_outcomes[slice_name] = (
+						'release not confirmed by SMF within '
+						f'{_RELEASE_CONFIRM_TIMEOUT_SEC}s -- aborting recovery attempt '
+						'without killing UE process, to avoid orphaning the IP pool slot'
+					)
+				return
+
 			subprocess.run(
 				['docker', 'exec', 'ueransim', 'pkill', '-f', config_file],
 				capture_output=True,
