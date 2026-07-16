@@ -201,7 +201,7 @@ class CampusSlicingEnv(gym.Env):
 
 			sla_met = latency_ms_ok and loss_i <= Loss_i
 			r_sla += si * (1.0 if sla_met else 0.0)
-			p_loss += si * loss_i
+			p_loss += si * (loss_i / 100.0)
 
 			r_util_sum += self._utilisation(name, metrics)
 

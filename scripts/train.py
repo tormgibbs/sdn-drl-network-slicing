@@ -12,21 +12,26 @@ from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from agent.env import CampusSlicingEnv
 
 SLICES_CONFIG_PATH = 'config/slices.yaml'
 MODELS_ROOT = Path('models')
 LOG_DIR = Path('logs/tensorboard')
-MONITOR_DIR = Path('logs/monitor')
 
 SEED = 42
 
 
-def _atomic_save(model: PPO, path: Path) -> None:
+def _atomic_save(model: PPO, path: Path, vec_env: VecNormalize | None = None) -> None:
 	tmp_path = path.with_suffix('.tmp.zip')
 	model.save(str(tmp_path))
 	os.replace(tmp_path, path)
+	if vec_env is not None:
+		stats_path = path.with_suffix('.pkl')
+		tmp_stats = stats_path.with_suffix('.tmp.pkl')
+		vec_env.save(str(tmp_stats))
+		os.replace(tmp_stats, stats_path)
 
 
 class AtomicCheckpointCallback(BaseCallback):
@@ -34,12 +39,14 @@ class AtomicCheckpointCallback(BaseCallback):
 		self,
 		save_every_n_rollouts: int,
 		save_dir: Path,
+		vec_env: VecNormalize,
 		name_prefix: str = 'ppo_slicing',
 		verbose: int = 1,
 	):
 		super().__init__(verbose)
 		self.save_every_n_rollouts = save_every_n_rollouts
 		self.save_dir = save_dir
+		self.vec_env = vec_env
 		self.name_prefix = name_prefix
 		self._rollout_count = 0
 		self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -58,11 +65,12 @@ class AtomicCheckpointCallback(BaseCallback):
 	def _save(self) -> None:
 		timesteps = self.num_timesteps
 		timestamped_path = self.save_dir / f'{self.name_prefix}_{timesteps}.zip'
-		_atomic_save(self.model, timestamped_path)
-		_atomic_save(self.model, self.save_dir / 'latest.zip')
+		_atomic_save(self.model, timestamped_path, self.vec_env)
+		_atomic_save(self.model, self.save_dir / 'latest.zip', self.vec_env)
 		if self.verbose:
 			print(
-				f'[checkpoint] saved {timestamped_path.name}, updated latest.zip (timesteps={timesteps}, post-update)'
+				f'[checkpoint] saved {timestamped_path.name}, updated latest.zip '
+				f'(timesteps={timesteps}, post-update)'
 			)
 
 
@@ -77,7 +85,8 @@ class TimingCallback(BaseCallback):
 			actions = self.locals.get('actions')
 			if actions is not None:
 				print(
-					f'[action-check] sample actions (pre-clip from policy): min={actions.min():.3f} max={actions.max():.3f}'
+					f'[action-check] sample actions (pre-clip from policy): '
+					f'min={actions.min():.3f} max={actions.max():.3f}'
 				)
 				self._logged_first_actions = True
 		return True
@@ -92,17 +101,7 @@ class TimingCallback(BaseCallback):
 		self._rollout_end_time = time.monotonic()
 
 
-def make_env() -> Monitor:
-	with open(SLICES_CONFIG_PATH) as f:
-		slices_config = yaml.safe_load(f)
-	env = CampusSlicingEnv(
-		slices_config=slices_config, ue_profiles=None, episode_length=100
-	)
-	MONITOR_DIR.mkdir(parents=True, exist_ok=True)
-	return Monitor(env, filename=str(MONITOR_DIR / 'monitor.csv'))
-
-
-def build_model(env, n_steps: int, resume_path: Path | None) -> PPO:
+def build_model(env: VecNormalize, n_steps: int, resume_path: Path | None) -> PPO:
 	LOG_DIR.mkdir(parents=True, exist_ok=True)
 	if resume_path is not None:
 		print(f'Resuming from {resume_path}')
@@ -124,6 +123,19 @@ def build_model(env, n_steps: int, resume_path: Path | None) -> PPO:
 	)
 
 
+def make_vec_env(monitor_path: Path, override_existing: bool) -> DummyVecEnv:
+	with open(SLICES_CONFIG_PATH) as f:
+		slices_config = yaml.safe_load(f)
+	env = CampusSlicingEnv(
+		slices_config=slices_config, ue_profiles=None, episode_length=100
+	)
+	monitor_path.parent.mkdir(parents=True, exist_ok=True)
+	monitored = Monitor(
+		env, filename=str(monitor_path), override_existing=override_existing
+	)
+	return DummyVecEnv([lambda: monitored])
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--total-timesteps', type=int, default=20_000)
@@ -135,20 +147,32 @@ def main() -> int:
 		'--run-name',
 		type=str,
 		default=time.strftime('%Y%m%d_%H%M%S'),
-		help='Subdirectory under models/ for this run. Pass the same value '
-		'with --resume to continue a specific prior run.',
 	)
 	args = parser.parse_args()
 	model_dir = MODELS_ROOT / args.run_name
+	model_dir.mkdir(parents=True, exist_ok=True)
 
-	env = make_env()
+	raw_vec_env = make_vec_env(
+		monitor_path=model_dir / 'monitor.csv',
+		override_existing=not args.resume,
+	)
+
+	stats_path = model_dir / 'latest.pkl'
+	if args.resume and stats_path.exists():
+		env = VecNormalize.load(str(stats_path), raw_vec_env)
+		env.training = True
+		env.norm_reward = True
+		print(f'Loaded VecNormalize stats from {stats_path}')
+	else:
+		if args.resume:
+			print(
+				f'Warning: no VecNormalize stats found at {stats_path} -- starting fresh normaliser'
+			)
+		# norm_obs=False: observation is already normalised [0,1] in env.py.
+		env = VecNormalize(raw_vec_env, norm_obs=False, norm_reward=True, clip_reward=10.0)
+
 	env.reset(seed=SEED)
 
-	# check_env()'s full suite assumes a simulated, seed-deterministic
-	# environment. CampusSlicingEnv wraps a live network (real probes,
-	# real traffic) and cannot satisfy check_step_determinism by design --
-	# two resets with the same seed legitimately observe different real
-	# network conditions. Validate space definitions directly instead.
 	raw_env = env.unwrapped
 	for space, name in (
 		(raw_env.action_space, 'action'),
@@ -175,12 +199,14 @@ def main() -> int:
 		AtomicCheckpointCallback(
 			save_every_n_rollouts=args.checkpoint_every_n_rollouts,
 			save_dir=model_dir,
+			vec_env=env,
 			verbose=1,
 		),
 	]
 
 	print(
-		f'Training: run_name={args.run_name} total_timesteps={total_timesteps} n_steps={args.n_steps} instrument={args.instrument} resume={args.resume}'
+		f'Training: run_name={args.run_name} total_timesteps={total_timesteps} '
+		f'n_steps={args.n_steps} instrument={args.instrument} resume={args.resume}'
 	)
 	model.learn(
 		total_timesteps=total_timesteps,
@@ -189,7 +215,7 @@ def main() -> int:
 	)
 
 	final_path = model_dir / 'final.zip'
-	_atomic_save(model, final_path)
+	_atomic_save(model, final_path, vec_env=env)
 	print(f'Training complete. Final model saved to {final_path}')
 	return 0
 

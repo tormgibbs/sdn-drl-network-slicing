@@ -1,6 +1,6 @@
 defaults:
   duration_sec: 60
-  inter_loop_gap_sec: 5
+  inter_loop_gap_sec: 0
 
 scenarios:
   lecture:
@@ -29,12 +29,12 @@ traffic_profiles:
   vle:
     pattern: mixed
     protocol: tcp
-    continuous_bps: 25_000_000
+    continuous_bps: 15_000_000
     continuous_port: 5201
     on_off_bps: 18_000_000
     on_off_port: 5202
-    mean_on_sec: 15
-    mean_off_sec: 45
+    mean_on_sec: 25
+    mean_off_sec: 15
     min_on_sec: 2
     min_off_sec: 2
     downlink_bps: 25_000_000
@@ -43,12 +43,12 @@ traffic_profiles:
   student_portal:
     pattern: mixed
     protocol: tcp
-    continuous_bps: 25_000_000
+    continuous_bps: 5_000_000
     continuous_port: 5201
     on_off_bps: 20_000_000
     on_off_port: 5202
-    mean_on_sec: 8
-    mean_off_sec: 20
+    mean_on_sec: 10
+    mean_off_sec: 10
     min_on_sec: 2
     min_off_sec: 2
     downlink_bps: 20_000_000
