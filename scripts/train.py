@@ -171,7 +171,7 @@ def main() -> int:
 		# norm_obs=False: observation is already normalised [0,1] in env.py.
 		env = VecNormalize(raw_vec_env, norm_obs=False, norm_reward=True, clip_reward=10.0)
 
-	env.reset(seed=SEED)
+	env.reset()
 
 	raw_env = env.unwrapped
 	for space, name in (
