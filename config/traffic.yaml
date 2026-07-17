@@ -28,7 +28,8 @@ scenarios:
 traffic_profiles:
   vle:
     pattern: mixed
-    protocol: tcp
+    protocol: udp
+    packet_size: 1400
     continuous_bps: 15_000_000
     continuous_port: 5201
     on_off_bps: 18_000_000
@@ -42,7 +43,8 @@ traffic_profiles:
     device_count: 3000
   student_portal:
     pattern: mixed
-    protocol: tcp
+    protocol: udp
+    packet_size: 1400
     continuous_bps: 5_000_000
     continuous_port: 5201
     on_off_bps: 20_000_000

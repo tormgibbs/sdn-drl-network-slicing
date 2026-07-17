@@ -9,7 +9,7 @@ slices:
     sst: 1
     sd: "000001"
     ue_subnet: 10.60.1.0/24
-    min_throughput_bps: 20_000_000
+    min_throughput_bps: 5_000_000
     max_latency_ms: 100
     max_loss_pct: 0.5
     sink_ip: 10.0.1.1
@@ -24,7 +24,7 @@ slices:
     sst: 1
     sd: "000002"
     ue_subnet: 10.60.2.0/24
-    min_throughput_bps: 10_000_000
+    min_throughput_bps: 3_000_000
     max_latency_ms: 50
     max_loss_pct: 0.1
     sink_ip: 10.0.2.1
@@ -39,7 +39,7 @@ slices:
     sst: 1
     sd: "000003"
     ue_subnet: 10.60.3.0/24
-    min_throughput_bps: 5_000_000
+    min_throughput_bps: 2_000_000
     max_latency_ms: 150
     max_loss_pct: 1.0
     sink_ip: 10.0.3.1
@@ -69,7 +69,7 @@ slices:
     sst: 1
     sd: "000005"
     ue_subnet: 10.60.5.0/24
-    min_throughput_bps: 2_000_000
+    min_throughput_bps: 1_000_000
     max_latency_ms: 500
     max_loss_pct: 10.0
     sink_ip: 10.0.5.1
