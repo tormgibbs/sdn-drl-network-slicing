@@ -276,7 +276,7 @@ class CampusSlicingEnv(gym.Env):
 		terminated = self._step_count >= self.episode_length
 		truncated = False
 
-		logger.info("step reward: %.4f active=%s", reward, active_names)
+		print(f'step reward: {reward:.4f} active={active_names}')
 		return (
 			obs,
 			reward,
