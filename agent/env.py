@@ -120,11 +120,8 @@ class CampusSlicingEnv(gym.Env):
 				raise ValueError(f'loss_pct out of range for slice {name!r}: {loss_pct}')
 
 			if latency_ms is None:
-				if loss_pct != 100.0:
-					raise ValueError(
-						f'latency_ms is None for slice {name!r} without 100% loss to explain it'
-					)
-			elif latency_ms < 0:
+				raise ValueError(f'latency_ms is None for slice {name!r}')
+			if latency_ms < 0:
 				raise ValueError(f'negative latency_ms for slice {name!r}: {latency_ms}')
 
 	def _tunnels_ready(self) -> bool:
@@ -155,16 +152,12 @@ class CampusSlicingEnv(gym.Env):
 	def _build_observation(self, metrics: dict) -> np.ndarray:
 		self._assert_rates_valid()
 		obs = []
+
 		for name in self.slice_order:
 			m = metrics[name]
-			latency_ms = (
-				m['latency_ms'] if m['latency_ms'] is not None else self.max_latency_ms[name]
-			)
-
-			latency_i = min(latency_ms / self.max_latency_ms[name], 1.0)
+			latency_i = min(m['latency_ms'] / self.max_latency_ms[name], 1.0)
 			loss_i = m['loss_pct'] / 100.0
 			utilisation_i = self._utilisation(name, metrics)
-
 			obs.extend([latency_i, loss_i, utilisation_i])
 
 		return np.array(obs, dtype=np.float32)
@@ -190,21 +183,14 @@ class CampusSlicingEnv(gym.Env):
 			Loss_i = cfg['max_loss_pct']
 
 			loss_i = m['loss_pct']
-			if m['latency_ms'] is None:
-				latency_ms_ok = False
-				p_latency += (
-					si * 1.0
-				)  # max penalty: slice unreachable, no latency signal available
-			else:
-				latency_ms_ok = m['latency_ms'] <= Li
-				p_latency += si * max(0.0, (m['latency_ms'] - Li) / Li)
+			latency_ms_ok = m['latency_ms'] <= Li
+			p_latency += si * max(0.0, (m['latency_ms'] - Li) / Li)
 
 			sla_met = latency_ms_ok and loss_i <= Loss_i
 			r_sla += si * (1.0 if sla_met else 0.0)
 			p_loss += si * (loss_i / 100.0)
 
 			r_util_sum += self._utilisation(name, metrics)
-
 			fairness_ratios.append(self._current_rates_kbps[name] / si)
 
 		r_util = r_util_sum / n_active

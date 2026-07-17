@@ -36,8 +36,7 @@ _PING_COUNT = 4
 _PING_INTERVAL = 0.2
 _PING_TIMEOUT = 1
 
-_RTT_RE = re.compile(r'rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms')
-_LOSS_RE = re.compile(r'(\d+)% packet loss')
+_ICMP_LINE_RE = re.compile(r'icmp_seq=(\d+).*?time=([\d.]+)\s*ms')
 
 _EXPECTED_REPLIES = 2
 _OFP_REPLY_WAIT_SEC = 1.0
@@ -73,7 +72,6 @@ class StatsCollector:
 		self._recovery_in_progress: set[str] = set()
 		self._recovery_outcomes: dict[str, str] = {}
 		self._recovery_attempts: dict[str, int] = {}
-		self._recovery_events: list[dict] = []
 		self._recovery_events: list[dict] = []
 		self._giving_up: set[str] = set()
 		self._healthy_streak: dict[str, int] = {}
@@ -365,6 +363,7 @@ class StatsCollector:
 		slice_name: str,
 		sink_ip: str,
 		probe_interface: str,
+		max_latency_ms: float,
 	) -> None:
 		# No logging inside this method to avoid lock contention on logging's
 		# internal lock across many concurrent probes.
@@ -390,11 +389,21 @@ class StatsCollector:
 				timeout=10,
 			)
 			output = result.stdout
-			rtt_match = _RTT_RE.search(output)
-			loss_match = _LOSS_RE.search(output)
-			# Divide by 2: ping reports round-trip, state space requires one-way.
-			latency_ms = float(rtt_match.group(1)) / 2.0 if rtt_match else None
-			loss_pct = float(loss_match.group(1)) if loss_match else 100.0
+
+			seen_seqs: dict[int, float] = {
+				int(seq): float(rtt) for seq, rtt in _ICMP_LINE_RE.findall(output)
+			}
+
+			rtts_ms: list[float] = []
+			for seq in range(1, _PING_COUNT + 1):
+				if seq in seen_seqs:
+					rtts_ms.append(seen_seqs[seq])
+				else:
+					rtts_ms.append(max_latency_ms * 2.0)
+
+			latency_ms = sum(rtts_ms) / len(rtts_ms) / 2.0
+			loss_pct = 100.0 * (len(rtts_ms) - len(seen_seqs)) / len(rtts_ms)
+
 			results[slice_name] = {
 				'latency_ms': latency_ms,
 				'loss_pct': loss_pct,
@@ -419,7 +428,8 @@ class StatsCollector:
 		for slice_name, cfg in slices_cfg.items():
 			sink_ip = cfg.get('sink_ip')
 			probe_interface = cfg.get('probe_interface')
-			if not sink_ip or not probe_interface:
+			max_latency_ms = cfg.get('max_latency_ms')
+			if not sink_ip or not probe_interface or max_latency_ms is None:
 				logger.warning(
 					'Stats collector: probe config missing for slice %s -- skipping',
 					slice_name,
@@ -431,6 +441,7 @@ class StatsCollector:
 				slice_name,
 				sink_ip,
 				probe_interface,
+				max_latency_ms,
 			)
 			greenlets.append(gt)
 
