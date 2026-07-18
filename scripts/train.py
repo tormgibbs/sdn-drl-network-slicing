@@ -133,25 +133,30 @@ def build_model(
 
 
 def make_vec_env(
-	monitor_path: Path, override_existing: bool, sim: bool = False
+	monitor_path: Path, override_existing: bool, sim: bool = False, n_envs: int = 1
 ) -> DummyVecEnv:
 	with open(SLICES_CONFIG_PATH) as f:
 		slices_config = yaml.safe_load(f)
 
-	if sim:
-		from agent.sim_env import SimCampusEnv
+	monitor_path.parent.mkdir(parents=True, exist_ok=True)
 
-		env = SimCampusEnv(slices_cfg=slices_config, episode_length=100)
-	else:
-		env = CampusSlicingEnv(
-			slices_config=slices_config, ue_profiles=None, episode_length=100
+	def make_single_env(idx: int):
+		if sim:
+			from agent.sim_env import SimCampusEnv
+
+			env = SimCampusEnv(slices_cfg=slices_config, episode_length=100)
+		else:
+			env = CampusSlicingEnv(
+				slices_config=slices_config, ue_profiles=None, episode_length=100
+			)
+		env_monitor_path = (
+			monitor_path.parent / f'monitor_{idx}.csv' if n_envs > 1 else monitor_path
+		)
+		return Monitor(
+			env, filename=str(env_monitor_path), override_existing=override_existing
 		)
 
-	monitor_path.parent.mkdir(parents=True, exist_ok=True)
-	monitored = Monitor(
-		env, filename=str(monitor_path), override_existing=override_existing
-	)
-	return DummyVecEnv([lambda: monitored])
+	return DummyVecEnv([lambda i=idx: make_single_env(i) for idx in range(n_envs)])
 
 
 def main() -> int:
@@ -165,6 +170,7 @@ def main() -> int:
 	parser.add_argument('--n-steps', type=int, default=2048)
 	parser.add_argument('--instrument', action='store_true')
 	parser.add_argument('--resume', action='store_true')
+	parser.add_argument('--n-envs', type=int, default=1)
 	parser.add_argument('--checkpoint-every-n-rollouts', type=int, default=1)
 	parser.add_argument('--n-epochs', type=int, default=20)
 	parser.add_argument('--vf-coef', type=float, default=0.5)
@@ -181,6 +187,7 @@ def main() -> int:
 		monitor_path=model_dir / 'monitor.csv',
 		override_existing=not args.resume,
 		sim=args.sim,
+		n_envs=args.n_envs,
 	)
 
 	stats_path = model_dir / 'latest.pkl'
