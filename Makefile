@@ -1,7 +1,7 @@
 .PHONY: topology clean-topology core-up core-down core-status controller module-load test ue-attach ue-status network-setup ue-setup up down traffic-start traffic-stop ue-detach smf-restart soak-init controller-soak traffic-soak soak-stop-traffic soak-stop-controller soak-stop-all
 
 LOOPS ?= 100
-	
+
 topology:
 	sudo python3 infrastructure/topology/campus_topology.py
 
@@ -36,7 +36,10 @@ controller:
 module-load:
 	sudo modprobe gtp5g
 	sudo modprobe mac80211_hwsim
-	lsmod | grep -E "gtp5g|mac80211_hwsim"
+	sudo modprobe tcp_bbr
+	sudo sysctl -w net.core.default_qdisc=fq
+	sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
+	lsmod | grep -E "gtp5g|mac80211_hwsim|tcp_bbr"
 
 ue-attach:
 	docker exec -d ueransim /ueransim/nr-ue -c /ueransim/config/uecfg-ue1.yaml
