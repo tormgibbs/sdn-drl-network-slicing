@@ -117,6 +117,8 @@ def build_model(env: VecNormalize, n_steps: int, resume_path: Path | None) -> PP
 		'MlpPolicy',
 		env,
 		n_steps=n_steps,
+		n_epochs=20,
+		batch_size=200,
 		seed=SEED,
 		verbose=1,
 		tensorboard_log=str(LOG_DIR),
