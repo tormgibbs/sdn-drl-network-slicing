@@ -3,6 +3,7 @@
 # latency and loss from active ICMP probes through UE tunnels.
 
 import asyncio
+import json
 import logging
 import re
 import subprocess
@@ -29,8 +30,11 @@ _RECOVERY_SETTLE_SEC = 2
 _RECOVERY_TIMEOUT_SEC = 30
 _MAX_RECOVERY_ATTEMPTS = 3
 
+_TRAFFIC_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'traffic.yaml'
 _TOPOLOGY_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'topology.yaml'
 _SLICES_CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'slices.yaml'
+_SLICE_PIDS_PATH = Path(__file__).resolve().parents[2] / 'config' / 'slice_pids.json'
+
 
 _PING_COUNT = 4
 _PING_INTERVAL = 0.2
@@ -75,6 +79,7 @@ class StatsCollector:
 		self._recovery_events: list[dict] = []
 		self._giving_up: set[str] = set()
 		self._healthy_streak: dict[str, int] = {}
+		self._traffic: dict | None = None
 
 	def _get_topology(self) -> dict:
 		if self._topology is None:
@@ -82,11 +87,27 @@ class StatsCollector:
 				self._topology = yaml.safe_load(f)
 		return self._topology
 
+	def _get_traffic(self) -> dict:
+		if self._traffic is None:
+			with open(_TRAFFIC_CONFIG) as f:
+				self._traffic = yaml.safe_load(f)
+		return self._traffic
+
 	def _get_slices(self) -> dict:
 		if self._slices is None:
 			with open(self._slices_config) as f:
 				self._slices = yaml.safe_load(f)
 		return self._slices
+
+	def _get_traffic(self) -> dict:
+		if self._traffic is None:
+			with open(_TRAFFIC_CONFIG) as f:
+				self._traffic = yaml.safe_load(f)
+		return self._traffic
+
+	def _load_slice_pids(self) -> dict[str, int]:
+		with open(_SLICE_PIDS_PATH) as f:
+			return json.load(f)
 
 	def _get_ue_identity(self) -> dict[str, dict]:
 		if self._ue_identity is None:
@@ -97,6 +118,55 @@ class StatsCollector:
 				for ue in config['ue_profiles'].values()
 			}
 		return self._ue_identity
+
+	def _read_iperf3_logfile(
+		self,
+		results: dict,
+		key: str,
+		logfile: str,
+		use_nsenter: bool,
+		sta_pid: int | None,
+		protocol: str,
+	) -> None:
+		try:
+			if use_nsenter:
+				cmd = ['nsenter', '-t', str(sta_pid), '-n', 'tail', '-n', '100', logfile]
+			else:
+				cmd = ['docker', 'exec', 'ueransim', 'tail', '-n', '100', logfile]
+
+			result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+
+			if result.returncode != 0 or not result.stdout.strip():
+				results[key] = {'loss_pct': None, 'error': f'logfile unreadable: {logfile}'}
+				return
+
+			last_interval = None
+			for line in result.stdout.splitlines():
+				line = line.strip()
+				if not line:
+					continue
+				try:
+					obj = json.loads(line)
+					if obj.get('event') == 'interval':
+						last_interval = obj['data']['sum']
+				except json.JSONDecodeError, KeyError:
+					continue
+
+			if last_interval is None:
+				results[key] = {'loss_pct': None, 'error': 'no interval data in logfile'}
+				return
+
+			if protocol == 'udp':
+				loss_pct = float(last_interval.get('lost_percent', 0.0))
+			else:
+				packets = last_interval.get('bytes', 0) / 1400
+				retransmits = last_interval.get('retransmits', 0)
+				loss_pct = min(100.0 * retransmits / packets, 100.0) if packets > 0 else 0.0
+
+			results[key] = {'loss_pct': loss_pct, 'error': None}
+
+		except Exception as exc:
+			results[key] = {'loss_pct': None, 'error': str(exc)}
 
 	def _check_data_pending(self, imsi: str) -> str:
 		try:
@@ -402,29 +472,28 @@ class StatsCollector:
 					rtts_ms.append(max_latency_ms * 2.0)
 
 			latency_ms = sum(rtts_ms) / len(rtts_ms) / 2.0
-			loss_pct = 100.0 * (len(rtts_ms) - len(seen_seqs)) / len(rtts_ms)
+			results[slice_name] = {'latency_ms': latency_ms, 'error': None}
 
-			results[slice_name] = {
-				'latency_ms': latency_ms,
-				'loss_pct': loss_pct,
-				'error': None,
-			}
 		except Exception as exc:
-			results[slice_name] = {
-				'latency_ms': None,
-				'loss_pct': None,
-				'error': str(exc),
-			}
+			results[slice_name] = {'latency_ms': None, 'error': str(exc)}
 
 	def _run_probe_cycle(self) -> None:
 		slices_cfg = self._get_slices()['slices']
+		traffic_profiles = self._get_traffic()['traffic_profiles']
 		probe_results: dict[str, dict] = {}
+		loss_results: dict[str, dict] = {}
 
 		logger.debug(
 			'Stats collector: starting probe cycle for slices=%s', list(slices_cfg.keys())
 		)
 
-		greenlets = []
+		try:
+			slice_pids = self._load_slice_pids()
+		except Exception as exc:
+			logger.warning('Stats collector: could not load slice PIDs: %s', exc)
+			slice_pids = {}
+
+		latency_greenlets = []
 		for slice_name, cfg in slices_cfg.items():
 			sink_ip = cfg.get('sink_ip')
 			probe_interface = cfg.get('probe_interface')
@@ -443,26 +512,85 @@ class StatsCollector:
 				probe_interface,
 				max_latency_ms,
 			)
-			greenlets.append(gt)
+			latency_greenlets.append(gt)
 
-		for gt in greenlets:
+		loss_greenlets = []
+		for slice_name, cfg in slices_cfg.items():
+			sta = cfg.get('sta')
+			probe_interface = cfg.get('probe_interface')
+			protocol = traffic_profiles.get(slice_name, {}).get('protocol', 'udp')
+			sta_pid = slice_pids.get(slice_name)
+
+			if not sta or not probe_interface:
+				continue
+
+			ul_logfile = f'/tmp/iperf3-{sta}-5201.log'
+			dl_logfile = f'/tmp/iperf3-{probe_interface}-dl.log'
+
+			gt_ul = hub.spawn(
+				self._read_iperf3_logfile,
+				loss_results,
+				f'{slice_name}_ul',
+				ul_logfile,
+				True,
+				sta_pid,
+				protocol,
+			)
+			loss_greenlets.append(gt_ul)
+
+			gt_dl = hub.spawn(
+				self._read_iperf3_logfile,
+				loss_results,
+				f'{slice_name}_dl',
+				dl_logfile,
+				False,
+				None,
+				protocol,
+			)
+			loss_greenlets.append(gt_dl)
+
+		for gt in latency_greenlets:
+			gt.wait()
+		for gt in loss_greenlets:
 			gt.wait()
 
-		for slice_name, probe in probe_results.items():
-			if probe['error']:
-				logger.warning(
-					'Stats collector: probe failed for slice %s: %s',
-					slice_name,
-					probe['error'],
-				)
+		merged: dict[str, dict] = {}
+		for slice_name, cfg in slices_cfg.items():
+			latency = probe_results.get(slice_name, {})
+			dl = loss_results.get(f'{slice_name}_dl', {})
+			ul = loss_results.get(f'{slice_name}_ul', {})
 
-		for slice_name, probe in probe_results.items():
+			latency_ms = latency.get('latency_ms')
+			max_latency_ms = cfg.get('max_latency_ms', 100.0)
+			if latency_ms is None:
+				latency_ms = max_latency_ms
+
+			dl_loss = dl.get('loss_pct')
+			ul_loss = ul.get('loss_pct')
+
+			if dl_loss is not None and ul_loss is not None:
+				loss_pct = max(dl_loss, ul_loss)
+			elif dl_loss is not None:
+				loss_pct = dl_loss
+			elif ul_loss is not None:
+				loss_pct = ul_loss
+			else:
+				loss_pct = 0.0
+
+			error = latency.get('error') or dl.get('error') or ul.get('error')
+
+			merged[slice_name] = {
+				'latency_ms': latency_ms,
+				'loss_pct': loss_pct,
+				'error': error,
+			}
+
 			logger.info(
 				'Stats collector: probe result: slice=%s latency_ms=%s loss_pct=%s error=%s',
 				slice_name,
-				probe['latency_ms'],
-				probe['loss_pct'],
-				probe['error'],
+				latency_ms,
+				loss_pct,
+				error,
 			)
 
 		with self._cache_lock:
@@ -473,7 +601,7 @@ class StatsCollector:
 			logger.warning('Stats collector: recovery for slice %s: %s', slice_name, outcome)
 
 		ue_identity = self._get_ue_identity()
-		for slice_name, probe in probe_results.items():
+		for slice_name, probe in merged.items():
 			is_failure = probe['loss_pct'] == 100.0 or probe['error'] is not None
 
 			with self._cache_lock:
@@ -588,7 +716,7 @@ class StatsCollector:
 			)
 
 		with self._cache_lock:
-			for slice_name, probe in probe_results.items():
+			for slice_name, probe in merged.items():
 				self._stats_cache[slice_name] = {
 					'tx_throughput_bps': self._pending_throughput.get(slice_name, 0.0),
 					'latency_ms': probe['latency_ms'],
@@ -600,9 +728,7 @@ class StatsCollector:
 				slice_name: dict(metrics) for slice_name, metrics in self._stats_cache.items()
 			}
 
-		logger.info(
-			'Stats collector: cache updated for slices=%s', list(probe_results.keys())
-		)
+		logger.info('Stats collector: cache updated for slices=%s', list(merged.keys()))
 
 		loop = rest_api.registry.loop
 		if loop is None:

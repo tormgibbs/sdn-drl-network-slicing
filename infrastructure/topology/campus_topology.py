@@ -163,8 +163,9 @@ def create_topology():
 		# transfer (esnet/iperf#1735, unresolved upstream) -- timeout forces
 		# a kill so the loop can respawn instead of staying stuck.
 		cmd = (
-			f'while true; do timeout 90s iperf3 -s -1 -p {port} --logfile {logfile}; '
-			f'done > /dev/null 2>&1 &'
+			f'while true; do timeout 90s iperf3 -s -1 -p {port} '
+			f'-i 1 --json-stream --forceflush; '
+			f'done > {logfile} 2>&1 &'
 		)
 		node.cmd(cmd)
 
@@ -172,9 +173,9 @@ def create_topology():
 	start_iperf3_loop(sta1, 5202, '/tmp/iperf3-sta1-5202.log')
 	start_iperf3_loop(sta3, 5201, '/tmp/iperf3-sta3-5201.log')
 	start_iperf3_loop(sta3, 5202, '/tmp/iperf3-sta3-5202.log')
-	start_iperf3_loop(sta5, 5201, '/tmp/iperf3-sta5.log')
-	start_iperf3_loop(sta7, 5201, '/tmp/iperf3-sta7.log')
-	start_iperf3_loop(sta9, 5201, '/tmp/iperf3-sta9.log')
+	start_iperf3_loop(sta5, 5201, '/tmp/iperf3-sta5-5201.log')
+	start_iperf3_loop(sta7, 5201, '/tmp/iperf3-sta7-5201.log')
+	start_iperf3_loop(sta9, 5201, '/tmp/iperf3-sta9-5201.log')
 
 	slice_sta_pids = {
 		'vle': sta1.pid,
