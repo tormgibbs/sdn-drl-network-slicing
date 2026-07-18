@@ -149,9 +149,13 @@ def make_vec_env(
 			env = CampusSlicingEnv(
 				slices_config=slices_config, ue_profiles=None, episode_length=100
 			)
+
 		env_monitor_path = (
-			monitor_path.parent / f'monitor_{idx}.csv' if n_envs > 1 else monitor_path
+			monitor_path.parent / f'monitor_{idx}'
+			if n_envs > 1
+			else monitor_path.parent / 'monitor'
 		)
+
 		return Monitor(
 			env, filename=str(env_monitor_path), override_existing=override_existing
 		)
