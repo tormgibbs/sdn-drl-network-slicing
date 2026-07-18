@@ -86,7 +86,7 @@ class SimCampusEnv(gym.Env):
 		}
 
 		self.action_space = spaces.Box(
-			low=-np.inf, high=np.inf, shape=(self._n,), dtype=np.float32
+			low=-10.0, high=10.0, shape=(self._n,), dtype=np.float32
 		)
 		self.observation_space = spaces.Box(
 			low=0.0, high=1.0, shape=(self._n * 3,), dtype=np.float32
