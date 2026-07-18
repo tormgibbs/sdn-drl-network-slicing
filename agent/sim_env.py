@@ -9,7 +9,9 @@ from gymnasium import spaces
 
 from agent.project_allocation import project_allocation, validate_floors
 
-W1, W2, W3, W4, W5 = 0.35, 0.20, 0.25, 0.10, 0.10
+_CONGESTION_THRESHOLD = 0.85
+
+W1, W2, W3, W4, W5, W6 = 0.35, 0.15, 0.20, 0.10, 0.10, 0.10
 
 _SCENARIOS = {
 	'lecture': {
@@ -188,6 +190,7 @@ class SimCampusEnv(gym.Env):
 		r_sla = 0.0
 		p_latency = 0.0
 		p_loss = 0.0
+		p_congestion = 0.0
 		r_util_sum = 0.0
 		fairness_ratios = []
 
@@ -209,6 +212,7 @@ class SimCampusEnv(gym.Env):
 			ceiling_bps = self._current_rates_kbps[name] * 1000
 			util = min(m['tx_throughput_bps'] / ceiling_bps, 1.0) if ceiling_bps > 0 else 0.0
 			r_util_sum += util
+			p_congestion += si * max(0.0, util - _CONGESTION_THRESHOLD)
 			fairness_ratios.append(self._current_rates_kbps[name] / si)
 
 		r_util = r_util_sum / n_active
@@ -216,7 +220,14 @@ class SimCampusEnv(gym.Env):
 		sum_sq = sum(r**2 for r in fairness_ratios)
 		p_fairness = 1.0 - (sum_ratios**2) / (n_active * sum_sq) if sum_sq > 0 else 0.0
 
-		return W1 * r_sla - W2 * p_latency - W3 * p_loss + W4 * r_util - W5 * p_fairness
+		return (
+			W1 * r_sla
+			- W2 * p_latency
+			- W3 * p_loss
+			- W4 * p_congestion
+			+ W5 * r_util
+			- W6 * p_fairness
+		)
 
 	def reset(self, *, seed=None, options=None):
 		super().reset(seed=seed)

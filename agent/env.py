@@ -23,8 +23,9 @@ WS_URL = 'ws://localhost:8080/ws/metrics'
 EQUAL_SPLIT = [0.2, 0.2, 0.2, 0.2, 0.2]
 
 # Reward function weights (see drl-agent-design.md Reward Function section).
-W1, W2, W3, W4, W5 = 0.35, 0.25, 0.20, 0.10, 0.10
+W1, W2, W3, W4, W5, W6 = 0.35, 0.15, 0.20, 0.10, 0.10, 0.10
 
+_CONGESTION_THRESHOLD = 0.85
 _TUNNEL_WAIT_TIMEOUT_SEC = 60
 _TUNNEL_WAIT_POLL_SEC = 2
 
@@ -167,11 +168,11 @@ class CampusSlicingEnv(gym.Env):
 
 	def _compute_reward(self, metrics: dict, active_names: list[str]) -> float:
 		self._assert_rates_valid()
-
 		n_active = len(active_names)
 		r_sla = 0.0
 		p_latency = 0.0
 		p_loss = 0.0
+		p_congestion = 0.0
 		r_util_sum = 0.0
 		fairness_ratios = []
 
@@ -183,6 +184,7 @@ class CampusSlicingEnv(gym.Env):
 			Loss_i = cfg['max_loss_pct']
 
 			loss_i = m['loss_pct']
+
 			latency_ms_ok = m['latency_ms'] <= Li
 			p_latency += si * max(0.0, (m['latency_ms'] - Li) / Li)
 
@@ -190,7 +192,10 @@ class CampusSlicingEnv(gym.Env):
 			r_sla += si * (1.0 if sla_met else 0.0)
 			p_loss += si * (loss_i / 100.0)
 
-			r_util_sum += self._utilisation(name, metrics)
+			util_i = self._utilisation(name, metrics)
+			r_util_sum += util_i
+			p_congestion += si * max(0.0, util_i - _CONGESTION_THRESHOLD)
+
 			fairness_ratios.append(self._current_rates_kbps[name] / si)
 
 		r_util = r_util_sum / n_active
@@ -199,7 +204,14 @@ class CampusSlicingEnv(gym.Env):
 		sum_sq_ratios = sum(r**2 for r in fairness_ratios)
 		p_fairness = 1.0 - (sum_ratios**2) / (n_active * sum_sq_ratios)
 
-		return W1 * r_sla - W2 * p_latency - W3 * p_loss + W4 * r_util - W5 * p_fairness
+		return (
+			W1 * r_sla
+			- W2 * p_latency
+			- W3 * p_loss
+			- W4 * p_congestion
+			+ W5 * r_util
+			- W6 * p_fairness
+		)
 
 	def reset(self, *, seed=None, options=None):
 		super().reset(seed=seed)
