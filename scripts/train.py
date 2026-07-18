@@ -125,12 +125,21 @@ def build_model(env: VecNormalize, n_steps: int, resume_path: Path | None) -> PP
 	)
 
 
-def make_vec_env(monitor_path: Path, override_existing: bool) -> DummyVecEnv:
+def make_vec_env(
+	monitor_path: Path, override_existing: bool, sim: bool = False
+) -> DummyVecEnv:
 	with open(SLICES_CONFIG_PATH) as f:
 		slices_config = yaml.safe_load(f)
-	env = CampusSlicingEnv(
-		slices_config=slices_config, ue_profiles=None, episode_length=100
-	)
+
+	if sim:
+		from agent.sim_env import SimCampusEnv
+
+		env = SimCampusEnv(slices_cfg=slices_config, episode_length=100)
+	else:
+		env = CampusSlicingEnv(
+			slices_config=slices_config, ue_profiles=None, episode_length=100
+		)
+
 	monitor_path.parent.mkdir(parents=True, exist_ok=True)
 	monitored = Monitor(
 		env, filename=str(monitor_path), override_existing=override_existing
@@ -140,6 +149,11 @@ def make_vec_env(monitor_path: Path, override_existing: bool) -> DummyVecEnv:
 
 def main() -> int:
 	parser = argparse.ArgumentParser()
+	parser.add_argument(
+		'--sim',
+		action='store_true',
+		help='train on fast simulation instead of live network',
+	)
 	parser.add_argument('--total-timesteps', type=int, default=20_000)
 	parser.add_argument('--n-steps', type=int, default=2048)
 	parser.add_argument('--instrument', action='store_true')
@@ -157,6 +171,7 @@ def main() -> int:
 	raw_vec_env = make_vec_env(
 		monitor_path=model_dir / 'monitor.csv',
 		override_existing=not args.resume,
+		sim=args.sim,
 	)
 
 	stats_path = model_dir / 'latest.pkl'
