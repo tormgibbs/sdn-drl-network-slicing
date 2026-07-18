@@ -101,7 +101,13 @@ class TimingCallback(BaseCallback):
 		self._rollout_end_time = time.monotonic()
 
 
-def build_model(env: VecNormalize, n_steps: int, resume_path: Path | None) -> PPO:
+def build_model(
+	env: VecNormalize,
+	n_steps: int,
+	n_epochs: int,
+	vf_coef: float,
+	resume_path: Path | None,
+) -> PPO:
 	LOG_DIR.mkdir(parents=True, exist_ok=True)
 	if resume_path is not None:
 		print(f'Resuming from {resume_path}')
@@ -117,8 +123,9 @@ def build_model(env: VecNormalize, n_steps: int, resume_path: Path | None) -> PP
 		'MlpPolicy',
 		env,
 		n_steps=n_steps,
-		n_epochs=20,
+		n_epochs=n_epochs,
 		batch_size=200,
+		vf_coef=vf_coef,
 		seed=SEED,
 		verbose=1,
 		tensorboard_log=str(LOG_DIR),
@@ -159,6 +166,8 @@ def main() -> int:
 	parser.add_argument('--instrument', action='store_true')
 	parser.add_argument('--resume', action='store_true')
 	parser.add_argument('--checkpoint-every-n-rollouts', type=int, default=1)
+	parser.add_argument('--n-epochs', type=int, default=20)
+	parser.add_argument('--vf-coef', type=float, default=0.5)
 	parser.add_argument(
 		'--run-name',
 		type=str,
@@ -207,7 +216,13 @@ def main() -> int:
 	if args.resume and not resume_path.exists():
 		raise FileNotFoundError(f'--resume given but {resume_path} does not exist')
 
-	model = build_model(env, n_steps=args.n_steps, resume_path=resume_path)
+	model = build_model(
+		env,
+		n_steps=args.n_steps,
+		n_epochs=args.n_epochs,
+		vf_coef=args.vf_coef,
+		resume_path=resume_path,
+	)
 
 	total_timesteps = args.n_steps * 2 if args.instrument else args.total_timesteps
 

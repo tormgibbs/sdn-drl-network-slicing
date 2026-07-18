@@ -37,22 +37,22 @@ _SCENARIOS = {
 
 _TRAFFIC_PROFILES = {
 	'vle': {
-		'continuous_bps': 15_000_000,
-		'on_off_bps': 18_000_000,
+		'continuous_bps': 25_000_000,
+		'on_off_bps': 35_000_000,
 		'pattern': 'mixed',
 		'mean_on': 25,
 		'mean_off': 15,
 	},
 	'student_portal': {
-		'continuous_bps': 5_000_000,
-		'on_off_bps': 20_000_000,
+		'continuous_bps': 15_000_000,
+		'on_off_bps': 30_000_000,
 		'pattern': 'mixed',
 		'mean_on': 10,
 		'mean_off': 10,
 	},
-	'admin': {'target_bps': 10_000_000, 'pattern': 'continuous'},
+	'admin': {'target_bps': 15_000_000, 'pattern': 'continuous'},
 	'iot': {'target_bps': 64_000, 'pattern': 'continuous'},
-	'general': {'target_bps': 5_000_000, 'pattern': 'continuous'},
+	'general': {'target_bps': 10_000_000, 'pattern': 'continuous'},
 }
 
 
