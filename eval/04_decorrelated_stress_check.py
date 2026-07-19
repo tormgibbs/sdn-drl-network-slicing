@@ -1,25 +1,16 @@
+# 04_decorrelated_stress_check.py
 """
 Filter real 'chaos' scenario episodes for a specific decorrelated stress
-combination (e.g. "slice A stressed, slice B NOT stressed"), and check what
-the policy actually does in those genuine, in-distribution states.
-
-WHY THIS EXISTS:
-If two slices are only ever stressed together in your scenario set (e.g.
-'registration' stresses both student_portal AND admin every time), a
-policy trained on that data will correctly learn "these move together" --
-which then looks like a bug on a hand-built probe that decorrelates them,
-even though it's actually a training-data confound, not a policy defect.
-'chaos' scenarios sample each slice's factor independently, so they're the
-right place to look for genuine decorrelated in-distribution examples.
-
-Always check this BEFORE concluding a policy has a "bias" toward one slice
-over another based on scenarios where they're always co-stressed.
+combination, and check what the policy actually does in those genuine,
+in-distribution states.
 
 USAGE:
-    uv run python 04_decorrelated_stress_check.py
-
-Edit SLICE_A / SLICE_B and the factor thresholds below.
+    uv run python 04_decorrelated_stress_check.py --model-path models/ironwood/final \
+        --slice-a student_portal --slice-a-min-factor 1.1 \
+        --slice-b admin --slice-b-max-factor 0.7
 """
+
+import argparse
 
 import numpy as np
 import yaml
@@ -27,44 +18,54 @@ from stable_baselines3 import PPO
 
 from agent.sim_env import SimCampusEnv
 
-SLICES_CONFIG_PATH = "config/slices.yaml"
-MODEL_PATH = "models/hawthorn/final"
-N_EPISODES = 500
-
-SLICE_A = "student_portal"   # the slice you want stressed
-SLICE_A_MIN_FACTOR = 1.1
-SLICE_B = "admin"            # the slice you want NOT stressed
-SLICE_B_MAX_FACTOR = 0.7
-
 
 def main() -> None:
-    slices_cfg = yaml.safe_load(open(SLICES_CONFIG_PATH))
-    slice_order = slices_cfg["slice_order"]
-    env = SimCampusEnv(slices_cfg)
-    model = PPO.load(MODEL_PATH)
+	parser = argparse.ArgumentParser(
+		description='Check policy behavior on decorrelated stress states'
+	)
+	parser.add_argument('--slices-config', default='config/slices.yaml')
+	parser.add_argument('--model-path', required=True)
+	parser.add_argument('--n-episodes', type=int, default=500)
+	parser.add_argument('--slice-a', required=True, help='slice you want stressed')
+	parser.add_argument('--slice-a-min-factor', type=float, default=1.1)
+	parser.add_argument('--slice-b', required=True, help='slice you want NOT stressed')
+	parser.add_argument('--slice-b-max-factor', type=float, default=0.7)
+	args = parser.parse_args()
 
-    found = 0
-    for _ in range(N_EPISODES):
-        obs, _ = env.reset()
-        if env._scenario != "chaos":
-            continue
-        a_factor = env._factors[SLICE_A]
-        b_factor = env._factors[SLICE_B]
-        if not (a_factor > SLICE_A_MIN_FACTOR and b_factor < SLICE_B_MAX_FACTOR):
-            continue
+	slices_cfg = yaml.safe_load(open(args.slices_config))
+	slice_order = slices_cfg['slice_order']
+	env = SimCampusEnv(slices_cfg)
+	model = PPO.load(args.model_path)
 
-        action, _ = model.predict(obs, deterministic=True)
-        exp = np.exp(action)
-        fracs = exp / exp.sum()
-        alloc_str = "  ".join(f"{name}={fracs[i]:.3f}" for i, name in enumerate(slice_order))
-        print(f"{SLICE_A}_factor={a_factor:.2f} {SLICE_B}_factor={b_factor:.2f} -> {alloc_str}")
-        found += 1
+	found = 0
+	for _ in range(args.n_episodes):
+		obs, _ = env.reset()
+		if env._scenario != 'chaos':
+			continue
+		a_factor = env._factors[args.slice_a]
+		b_factor = env._factors[args.slice_b]
+		if not (a_factor > args.slice_a_min_factor and b_factor < args.slice_b_max_factor):
+			continue
 
-    print(f"\n{found} matching episodes out of {N_EPISODES} "
-          f"({SLICE_A} stressed >{SLICE_A_MIN_FACTOR}, {SLICE_B} light <{SLICE_B_MAX_FACTOR})")
-    if found < 20:
-        print("Few matches -- consider raising N_EPISODES for a more reliable read.")
+		action, _ = model.predict(obs, deterministic=True)
+		exp = np.exp(action)
+		fracs = exp / exp.sum()
+		alloc_str = '  '.join(
+			f'{name}={fracs[i]:.3f}' for i, name in enumerate(slice_order)
+		)
+		print(
+			f'{args.slice_a}_factor={a_factor:.2f} {args.slice_b}_factor={b_factor:.2f} -> {alloc_str}'
+		)
+		found += 1
+
+	print(
+		f'\n{found} matching episodes out of {args.n_episodes} '
+		f'({args.slice_a} stressed >{args.slice_a_min_factor}, '
+		f'{args.slice_b} light <{args.slice_b_max_factor})'
+	)
+	if found < 20:
+		print('Few matches -- consider raising --n-episodes for a more reliable read.')
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+	main()

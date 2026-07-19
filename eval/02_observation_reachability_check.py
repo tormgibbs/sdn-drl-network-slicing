@@ -1,72 +1,87 @@
+# 02_observation_reachability_check.py
 """
 Check whether a hand-crafted synthetic observation vector is actually
 reachable under real rollouts, before trusting any eval/probe built on it.
 
-WHY THIS EXISTS:
-A synthetic "SP only stressed" probe made a checkpoint look wrong on one
-dimension. This script proved that exact combination of (latency, loss,
-utilisation) for a slice occurs in ~0.5% of real steps -- meaning the
-checkpoint's behaviour there was almost entirely unconstrained by training
-and not a fair test. Run this BEFORE trusting any hand-built observation
-probe for checkpoint comparison or behaviour analysis.
-
 USAGE:
-    uv run python 02_observation_reachability_check.py
-
-Edit SLICE_INDEX and the synthetic thresholds below to match whatever
-probe you're trying to validate.
+    uv run python 02_observation_reachability_check.py --slice-index 1 \
+        --latency-threshold 0.15 --loss-exact 0.0 --util-threshold 0.25
 """
+
+import argparse
 
 import numpy as np
 import yaml
 
 from agent.sim_env import SimCampusEnv
 
-SLICES_CONFIG_PATH = "config/slices.yaml"
-N_EPISODES = 500
-STEPS_PER_EPISODE = 20  # sample early-mid episode, not just reset() state
-
-# Which slice's observation triple (latency_i, loss_i, util_i) to check,
-# and the synthetic thresholds you want to validate reachability for.
-SLICE_INDEX = 0  # 0=vle, 1=student_portal, 2=admin, 3=iot, 4=general per slice_order
-LATENCY_THRESHOLD = 0.15   # e.g. "latency_i < 0.15"
-LOSS_EXACT = 0.0           # e.g. "loss_i == 0.0"
-UTIL_THRESHOLD = 0.25      # e.g. "util_i < 0.25"
-
 
 def main() -> None:
-    slices_cfg = yaml.safe_load(open(SLICES_CONFIG_PATH))
-    env = SimCampusEnv(slices_cfg)
+	parser = argparse.ArgumentParser(
+		description='Check reachability of a synthetic observation'
+	)
+	parser.add_argument('--slices-config', default='config/slices.yaml')
+	parser.add_argument('--n-episodes', type=int, default=500)
+	parser.add_argument('--steps-per-episode', type=int, default=20)
+	parser.add_argument(
+		'--slice-index',
+		type=int,
+		default=0,
+		help='0=vle 1=student_portal 2=admin 3=iot 4=general (per slice_order)',
+	)
+	parser.add_argument('--latency-threshold', type=float, default=0.15)
+	parser.add_argument('--loss-exact', type=float, default=0.0)
+	parser.add_argument('--util-threshold', type=float, default=0.25)
+	args = parser.parse_args()
 
-    samples = []
-    for _ in range(N_EPISODES):
-        obs, _ = env.reset()
-        for _ in range(STEPS_PER_EPISODE):
-            action = env.action_space.sample()
-            obs, _, terminated, truncated, _ = env.step(action)
-            start = SLICE_INDEX * 3
-            samples.append(obs[start:start + 3].tolist())
-            if terminated or truncated:
-                break
+	slices_cfg = yaml.safe_load(open(args.slices_config))
+	env = SimCampusEnv(slices_cfg)
 
-    arr = np.array(samples)
-    lat, loss, util = arr[:, 0], arr[:, 1], arr[:, 2]
+	samples = []
+	for _ in range(args.n_episodes):
+		obs, _ = env.reset()
+		for _ in range(args.steps_per_episode):
+			action = env.action_space.sample()
+			obs, _, terminated, truncated, _ = env.step(action)
+			start = args.slice_index * 3
+			samples.append(obs[start : start + 3].tolist())
+			if terminated or truncated:
+				break
 
-    print(f"Observation range over {N_EPISODES} episodes x up to {STEPS_PER_EPISODE} steps "
-          f"(slice index {SLICE_INDEX}):")
-    print(f"  latency_i: min={lat.min():.3f} max={lat.max():.3f} mean={lat.mean():.3f}")
-    print(f"  loss_i:    min={loss.min():.3f} max={loss.max():.3f} mean={loss.mean():.3f}")
-    print(f"  util_i:    min={util.min():.3f} max={util.max():.3f} mean={util.mean():.3f}")
+	arr = np.array(samples)
+	lat, loss, util = arr[:, 0], arr[:, 1], arr[:, 2]
 
-    print(f"\nFraction matching latency_i < {LATENCY_THRESHOLD}: {(lat < LATENCY_THRESHOLD).mean():.3f}")
-    print(f"Fraction matching loss_i == {LOSS_EXACT}:          {(loss == LOSS_EXACT).mean():.3f}")
-    print(f"Fraction matching util_i < {UTIL_THRESHOLD}:        {(util < UTIL_THRESHOLD).mean():.3f}")
+	print(
+		f'Observation range over {args.n_episodes} episodes x up to {args.steps_per_episode} steps '
+		f'(slice index {args.slice_index}):'
+	)
+	print(f'  latency_i: min={lat.min():.3f} max={lat.max():.3f} mean={lat.mean():.3f}')
+	print(
+		f'  loss_i:    min={loss.min():.3f} max={loss.max():.3f} mean={loss.mean():.3f}'
+	)
+	print(
+		f'  util_i:    min={util.min():.3f} max={util.max():.3f} mean={util.mean():.3f}'
+	)
 
-    all_match = (lat < LATENCY_THRESHOLD) & (loss == LOSS_EXACT) & (util < UTIL_THRESHOLD)
-    print(f"\nFraction matching ALL THREE synthetic conditions: {all_match.mean():.4f}")
-    print("(If this is near 0, the synthetic probe is out-of-distribution --")
-    print(" don't trust checkpoint behaviour on it as representative.)")
+	print(
+		f'\nFraction matching latency_i < {args.latency_threshold}: {(lat < args.latency_threshold).mean():.3f}'
+	)
+	print(
+		f'Fraction matching loss_i == {args.loss_exact}:          {(loss == args.loss_exact).mean():.3f}'
+	)
+	print(
+		f'Fraction matching util_i < {args.util_threshold}:        {(util < args.util_threshold).mean():.3f}'
+	)
+
+	all_match = (
+		(lat < args.latency_threshold)
+		& (loss == args.loss_exact)
+		& (util < args.util_threshold)
+	)
+	print(f'\nFraction matching ALL THREE synthetic conditions: {all_match.mean():.4f}')
+	print('(If this is near 0, the synthetic probe is out-of-distribution --')
+	print(" don't trust checkpoint behaviour on it as representative.)")
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+	main()
