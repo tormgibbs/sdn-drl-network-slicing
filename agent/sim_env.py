@@ -1,74 +1,57 @@
 # agent/sim_env.py
 from __future__ import annotations
 
+from pathlib import Path
+
 import gymnasium as gym
 import numpy as np
+import yaml
 from gymnasium import spaces
 
 from agent.project_allocation import project_allocation, validate_floors
 
 _CONGESTION_THRESHOLD = 0.85
 
+_TRAFFIC_CONFIG_PATH = Path('config/traffic.yaml')
+
 W1, W2, W3, W4, W5, W6 = 0.35, 0.15, 0.20, 0.10, 0.10, 0.10
 
-# dl key present for structural consistency with traffic.yaml; _offered_bps uses ul only.
-_SCENARIOS = {
-	'normal': {
-		'vle': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'student_portal': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'admin': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'iot': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'general': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-	},
-	'registration': {
-		'vle': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'student_portal': {'ul': (1.20, 1.60), 'dl': (1.20, 1.60)},
-		'admin': {'ul': (1.20, 1.50), 'dl': (1.20, 1.50)},
-		'iot': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
-		'general': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
-	},
-	'exam_period': {
-		'vle': {'ul': (1.20, 1.60), 'dl': (1.20, 1.60)},
-		'student_portal': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'admin': {'ul': (1.00, 1.20), 'dl': (1.00, 1.20)},
-		'iot': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
-		'general': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
-	},
-	'general_spike': {
-		'vle': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'student_portal': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'admin': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
-		'iot': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
-		'general': {'ul': (1.20, 1.60), 'dl': (1.20, 1.60)},
-	},
-	'chaos': {
-		'vle': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
-		'student_portal': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
-		'admin': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
-		'iot': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
-		'general': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
-	},
-}
 
-_TRAFFIC_PROFILES = {
-	'vle': {
-		'continuous_bps': 25_000_000,
-		'on_off_bps': 35_000_000,
-		'pattern': 'mixed',
-		'mean_on': 25,
-		'mean_off': 15,
-	},
-	'student_portal': {
-		'continuous_bps': 15_000_000,
-		'on_off_bps': 30_000_000,
-		'pattern': 'mixed',
-		'mean_on': 10,
-		'mean_off': 10,
-	},
-	'iot': {'target_bps': 64_000, 'pattern': 'continuous'},
-	'admin': {'target_bps': 20_500_000, 'pattern': 'continuous'},
-	'general': {'target_bps': 17_500_000, 'pattern': 'continuous'},
-}
+def _load_scenarios_and_profiles() -> tuple[dict, dict]:
+	with open(_TRAFFIC_CONFIG_PATH) as f:
+		cfg = yaml.safe_load(f)
+
+	scenarios = {}
+	for scenario_name, slices in cfg['scenarios'].items():
+		scenarios[scenario_name] = {
+			name: {
+				'ul': tuple(s['ul_factor_range']),
+				'dl': tuple(s['dl_factor_range']),
+			}
+			for name, s in slices.items()
+		}
+
+	profiles = {}
+	for name, p in cfg['traffic_profiles'].items():
+		if p['pattern'] == 'mixed':
+			profiles[name] = {
+				'continuous_bps': p['continuous_bps'],
+				'on_off_bps': p['on_off_bps'],
+				'pattern': 'mixed',
+				'mean_on': p['mean_on_sec'],
+				'mean_off': p['mean_off_sec'],
+			}
+		else:
+			profiles[name] = {
+				'target_bps': p['target_bps'],
+				'pattern': 'continuous',
+			}
+
+	return scenarios, profiles
+
+
+# dl key present for structural consistency with traffic.yaml; _offered_bps uses ul only.
+_SCENARIOS, _TRAFFIC_PROFILES = _load_scenarios_and_profiles()
 
 
 class SimCampusEnv(gym.Env):
