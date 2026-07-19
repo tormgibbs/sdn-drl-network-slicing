@@ -1,8 +1,6 @@
 # agent/sim_env.py
 from __future__ import annotations
 
-import random
-
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -13,27 +11,42 @@ _CONGESTION_THRESHOLD = 0.85
 
 W1, W2, W3, W4, W5, W6 = 0.35, 0.15, 0.20, 0.10, 0.10, 0.10
 
+# dl key present for structural consistency with traffic.yaml; _offered_bps uses ul only.
 _SCENARIOS = {
-	'lecture': {
-		'vle': {'ul': (0.80, 1.00), 'dl': (0.80, 1.00)},
-		'student_portal': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
-		'admin': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
-		'iot': {'ul': (0.80, 1.00), 'dl': (0.80, 1.00)},
-		'general': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
+	'normal': {
+		'vle': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'student_portal': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'admin': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'iot': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'general': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
 	},
 	'registration': {
-		'vle': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
-		'student_portal': {'ul': (0.80, 1.00), 'dl': (0.80, 1.00)},
-		'admin': {'ul': (0.80, 1.00), 'dl': (0.80, 1.00)},
-		'iot': {'ul': (0.80, 1.00), 'dl': (0.80, 1.00)},
-		'general': {'ul': (0.80, 1.00), 'dl': (0.80, 1.00)},
+		'vle': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'student_portal': {'ul': (1.20, 1.60), 'dl': (1.20, 1.60)},
+		'admin': {'ul': (1.20, 1.50), 'dl': (1.20, 1.50)},
+		'iot': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
+		'general': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
 	},
-	'off_peak': {
-		'vle': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
-		'student_portal': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
-		'admin': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
-		'iot': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
-		'general': {'ul': (0.60, 0.70), 'dl': (0.60, 0.70)},
+	'exam_period': {
+		'vle': {'ul': (1.20, 1.60), 'dl': (1.20, 1.60)},
+		'student_portal': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'admin': {'ul': (1.00, 1.20), 'dl': (1.00, 1.20)},
+		'iot': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
+		'general': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
+	},
+	'general_spike': {
+		'vle': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'student_portal': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'admin': {'ul': (0.50, 0.70), 'dl': (0.50, 0.70)},
+		'iot': {'ul': (0.60, 0.80), 'dl': (0.60, 0.80)},
+		'general': {'ul': (1.20, 1.60), 'dl': (1.20, 1.60)},
+	},
+	'chaos': {
+		'vle': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
+		'student_portal': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
+		'admin': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
+		'iot': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
+		'general': {'ul': (0.40, 1.40), 'dl': (0.40, 1.40)},
 	},
 }
 
@@ -52,9 +65,9 @@ _TRAFFIC_PROFILES = {
 		'mean_on': 10,
 		'mean_off': 10,
 	},
-	'admin': {'target_bps': 15_000_000, 'pattern': 'continuous'},
 	'iot': {'target_bps': 64_000, 'pattern': 'continuous'},
-	'general': {'target_bps': 10_000_000, 'pattern': 'continuous'},
+	'admin': {'target_bps': 20_500_000, 'pattern': 'continuous'},
+	'general': {'target_bps': 17_500_000, 'pattern': 'continuous'},
 }
 
 
@@ -88,7 +101,7 @@ class SimCampusEnv(gym.Env):
 		}
 
 		self.action_space = spaces.Box(
-			low=-10.0, high=10.0, shape=(self._n,), dtype=np.float32
+			low=-1.0, high=1.0, shape=(self._n,), dtype=np.float32
 		)
 		self.observation_space = spaces.Box(
 			low=0.0, high=1.0, shape=(self._n * 3,), dtype=np.float32
@@ -98,24 +111,24 @@ class SimCampusEnv(gym.Env):
 		self._step_count = 0
 		self._on_off_state: dict[str, bool] = {}
 		self._on_off_timer: dict[str, float] = {}
-		self._scenario: str = 'lecture'
+		self._scenario: str = 'normal'
 		self._factors: dict[str, float] = {}
 		self._base_latency_ms: dict[str, float] = {}
 
 	def _sample_scenario(self) -> None:
-		self._scenario = random.choice(list(_SCENARIOS.keys()))
+		self._scenario = self.np_random.choice(list(_SCENARIOS.keys()))
 		scenario = _SCENARIOS[self._scenario]
 		for name in self.slice_order:
 			lo, hi = scenario[name]['ul']
-			self._factors[name] = random.uniform(lo, hi)
+			self._factors[name] = self.np_random.uniform(lo, hi)
 
 		for name in self.slice_order:
 			profile = _TRAFFIC_PROFILES[name]
 			if profile['pattern'] == 'mixed':
 				self._on_off_state[name] = False
-				self._on_off_timer[name] = random.expovariate(1.0 / profile['mean_off'])
+				self._on_off_timer[name] = self.np_random.exponential(profile['mean_off'])
 			# Baseline one-way latency — emulates GTP tunnel + OVS pipeline overhead
-			self._base_latency_ms[name] = random.uniform(5.0, 20.0)
+			self._base_latency_ms[name] = self.np_random.uniform(5.0, 20.0)
 
 	def _offered_bps(self, name: str) -> float:
 		profile = _TRAFFIC_PROFILES[name]
@@ -134,12 +147,12 @@ class SimCampusEnv(gym.Env):
 		if self._on_off_timer[name] <= 0:
 			self._on_off_state[name] = not self._on_off_state[name]
 			if self._on_off_state[name]:
-				self._on_off_timer[name] = random.expovariate(
-					1.0 / _TRAFFIC_PROFILES[name]['mean_on']
+				self._on_off_timer[name] = self.np_random.exponential(
+					_TRAFFIC_PROFILES[name]['mean_on']
 				)
 			else:
-				self._on_off_timer[name] = random.expovariate(
-					1.0 / _TRAFFIC_PROFILES[name]['mean_off']
+				self._on_off_timer[name] = self.np_random.exponential(
+					_TRAFFIC_PROFILES[name]['mean_off']
 				)
 
 		return continuous + burst
@@ -162,7 +175,7 @@ class SimCampusEnv(gym.Env):
 
 			# Latency rises slightly under high utilisation — emulates kernel forwarding pressure
 			latency_ms = self._base_latency_ms[name] * (1.0 + 0.5 * utilisation)
-			latency_ms += random.gauss(0, 2.0)
+			latency_ms += self.np_random.normal(0, 2.0)
 			latency_ms = max(1.0, latency_ms)
 
 			metrics[name] = {
@@ -259,6 +272,7 @@ class SimCampusEnv(gym.Env):
 		reward = self._compute_reward(metrics)
 
 		self._step_count += 1
-		terminated = self._step_count >= self.episode_length
+		truncated = self._step_count >= self.episode_length
+		terminated = False
 
-		return obs, reward, terminated, False, {}
+		return obs, reward, terminated, truncated, {}

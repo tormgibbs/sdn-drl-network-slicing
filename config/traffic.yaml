@@ -3,36 +3,50 @@ defaults:
   inter_loop_gap_sec: 0
 
 scenarios:
-  lecture:
-    vle: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
+  normal:
+    vle: { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
     student_portal:
-      { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
-    admin: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
-    iot: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
-    general: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+      { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
+    admin: { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
+    iot: { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
+    general: { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
   registration:
-    vle: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+    vle: { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
     student_portal:
-      { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
-    admin: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
-    iot: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
-    general: { ul_factor_range: [0.80, 1.00], dl_factor_range: [0.80, 1.00] }
-  off_peak:
-    vle: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+      { ul_factor_range: [1.20, 1.60], dl_factor_range: [1.20, 1.60] }
+    admin: { ul_factor_range: [1.20, 1.50], dl_factor_range: [1.20, 1.50] }
+    iot: { ul_factor_range: [0.60, 0.80], dl_factor_range: [0.60, 0.80] }
+    general: { ul_factor_range: [0.60, 0.80], dl_factor_range: [0.60, 0.80] }
+  exam_period:
+    vle: { ul_factor_range: [1.20, 1.60], dl_factor_range: [1.20, 1.60] }
     student_portal:
-      { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
-    admin: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
-    iot: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
-    general: { ul_factor_range: [0.60, 0.70], dl_factor_range: [0.60, 0.70] }
+      { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
+    admin: { ul_factor_range: [1.00, 1.20], dl_factor_range: [1.00, 1.20] }
+    iot: { ul_factor_range: [0.60, 0.80], dl_factor_range: [0.60, 0.80] }
+    general: { ul_factor_range: [0.60, 0.80], dl_factor_range: [0.60, 0.80] }
+  general_spike:
+    vle: { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
+    student_portal:
+      { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
+    admin: { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
+    iot: { ul_factor_range: [0.60, 0.80], dl_factor_range: [0.60, 0.80] }
+    general: { ul_factor_range: [1.20, 1.60], dl_factor_range: [1.20, 1.60] }
+  chaos:
+    vle: { ul_factor_range: [0.40, 1.40], dl_factor_range: [0.40, 1.40] }
+    student_portal:
+      { ul_factor_range: [0.40, 1.40], dl_factor_range: [0.40, 1.40] }
+    admin: { ul_factor_range: [0.40, 1.40], dl_factor_range: [0.40, 1.40] }
+    iot: { ul_factor_range: [0.40, 1.40], dl_factor_range: [0.40, 1.40] }
+    general: { ul_factor_range: [0.40, 1.40], dl_factor_range: [0.40, 1.40] }
 
 traffic_profiles:
   vle:
     pattern: mixed
     protocol: udp
     packet_size: 1400
-    continuous_bps: 15_000_000
+    continuous_bps: 25_000_000
     continuous_port: 5201
-    on_off_bps: 18_000_000
+    on_off_bps: 35_000_000
     on_off_port: 5202
     mean_on_sec: 25
     mean_off_sec: 15
@@ -45,9 +59,9 @@ traffic_profiles:
     pattern: mixed
     protocol: udp
     packet_size: 1400
-    continuous_bps: 5_000_000
+    continuous_bps: 15_000_000
     continuous_port: 5201
-    on_off_bps: 20_000_000
+    on_off_bps: 30_000_000
     on_off_port: 5202
     mean_on_sec: 10
     mean_off_sec: 10
@@ -59,7 +73,7 @@ traffic_profiles:
   admin:
     pattern: continuous
     protocol: tcp
-    target_bps: 10_000_000
+    target_bps: 20_500_000
     port: 5201
     downlink_bps: 10_000_000
     device_count: 500
@@ -74,7 +88,7 @@ traffic_profiles:
   general:
     pattern: continuous
     protocol: tcp
-    target_bps: 5_000_000
+    target_bps: 17_500_000
     port: 5201
     downlink_bps: 15_000_000
     device_count: 500

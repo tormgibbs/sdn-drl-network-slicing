@@ -202,7 +202,9 @@ class CampusSlicingEnv(gym.Env):
 
 		sum_ratios = sum(fairness_ratios)
 		sum_sq_ratios = sum(r**2 for r in fairness_ratios)
-		p_fairness = 1.0 - (sum_ratios**2) / (n_active * sum_sq_ratios)
+		p_fairness = (
+			1.0 - (sum_ratios**2) / (n_active * sum_sq_ratios) if sum_sq_ratios > 0 else 0.0
+		)
 
 		return (
 			W1 * r_sla
@@ -285,8 +287,8 @@ class CampusSlicingEnv(gym.Env):
 		self._last_obs = obs
 
 		self._step_count += 1
-		terminated = self._step_count >= self.episode_length
-		truncated = False
+		truncated = self._step_count >= self.episode_length
+		terminated = False
 
 		return (
 			obs,

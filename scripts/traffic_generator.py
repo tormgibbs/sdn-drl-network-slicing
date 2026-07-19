@@ -178,14 +178,15 @@ def sample_scenario(
 	scenario_name: str,
 	scenario_cfg: dict,
 	profiles: dict,
+	rng: random.Random,
 ) -> dict:
 	effective = {}
 	for slice_name, profile in profiles.items():
 		factors = scenario_cfg.get(slice_name, {})
 		ul_lo, ul_hi = factors.get('ul_factor_range', [1.0, 1.0])
 		dl_lo, dl_hi = factors.get('dl_factor_range', [1.0, 1.0])
-		ul_factor = random.uniform(ul_lo, ul_hi)
-		dl_factor = random.uniform(dl_lo, dl_hi)
+		ul_factor = rng.uniform(ul_lo, ul_hi)
+		dl_factor = rng.uniform(dl_lo, dl_hi)
 
 		p = dict(profile)
 		if p.get('pattern') == 'mixed':
@@ -570,6 +571,7 @@ def run_on_off_component(
 	duration: int,
 	stop_event: threading.Event,
 	scenario: str,
+	rng: random.Random,
 ) -> list[dict]:
 	results = []
 	elapsed = 0
@@ -577,7 +579,7 @@ def run_on_off_component(
 	min_off = profile.get('min_off_sec', 2)
 
 	while elapsed < duration and not stop_event.is_set():
-		on_sec = max(min_on, int(random.expovariate(1.0 / profile['mean_on_sec'])))
+		on_sec = max(min_on, int(rng.expovariate(1.0 / profile['mean_on_sec'])))
 		on_sec = min(on_sec, duration - elapsed)
 		if on_sec <= 0:
 			break
@@ -612,7 +614,7 @@ def run_on_off_component(
 		if elapsed >= duration or stop_event.is_set():
 			break
 
-		off_sec = max(min_off, int(random.expovariate(1.0 / profile['mean_off_sec'])))
+		off_sec = max(min_off, int(rng.expovariate(1.0 / profile['mean_off_sec'])))
 		off_sec = min(off_sec, duration - elapsed)
 		stop_event.wait(timeout=off_sec)
 		elapsed += off_sec
@@ -621,7 +623,12 @@ def run_on_off_component(
 
 
 def run_mixed_slice(
-	slice_name: str, profile: dict, network: dict, duration: int, scenario: str
+	slice_name: str,
+	profile: dict,
+	network: dict,
+	duration: int,
+	scenario: str,
+	rng: random.Random,
 ) -> list[dict]:
 	results = []
 	stop_event = threading.Event()
@@ -659,7 +666,7 @@ def run_mixed_slice(
 	t = threading.Thread(target=continuous, daemon=True)
 	t.start()
 	on_off_results = run_on_off_component(
-		slice_name, profile, network, duration, stop_event, scenario
+		slice_name, profile, network, duration, stop_event, scenario, rng,
 	)
 	results.extend(on_off_results)
 	t.join()
@@ -673,6 +680,7 @@ def run_slice(
 	duration: int,
 	sta_pid: int,
 	scenario: str,
+	rng: random.Random,
 ) -> list[dict]:
 	pattern = profile.get('pattern', 'continuous')
 	logger.info(
@@ -688,7 +696,7 @@ def run_slice(
 	def run_ul():
 		if pattern == 'mixed':
 			ul_results.extend(
-				run_mixed_slice(slice_name, profile, network, duration, scenario)
+				run_mixed_slice(slice_name, profile, network, duration, scenario, rng)
 			)
 		else:
 			ul_results.extend(
@@ -719,6 +727,7 @@ def save_results(results: list[dict], output_dir: Path) -> None:
 
 
 def main():
+	profiles, defaults, scenarios = load_traffic_config()
 	parser = argparse.ArgumentParser(
 		description='Per-slice bidirectional iperf3 traffic generator'
 	)
@@ -726,13 +735,17 @@ def main():
 	parser.add_argument('--loops', type=int, default=0)
 	parser.add_argument(
 		'--scenario',
-		choices=['lecture', 'registration', 'off_peak'],
+		choices=list(scenarios.keys()),
 		default=None,
 		help='Fix scenario for all loops. Omit to sample randomly each loop.',
 	)
+	parser.add_argument(
+		'--seed',
+		type=int,
+		default=None,
+		help='Seed for scenario/factor/burst-timing RNG. Omit for a nondeterministic run.',
+	)
 	args = parser.parse_args()
-
-	profiles, defaults, scenarios = load_traffic_config()
 	slice_network = load_slice_network()
 	default_duration = defaults.get('duration_sec', 60)
 	inter_loop_gap = defaults.get('inter_loop_gap_sec', 5)
@@ -759,23 +772,25 @@ def main():
 	signal.signal(signal.SIGINT, handle_signal)
 	signal.signal(signal.SIGTERM, handle_signal)
 
+	master_rng = random.Random(args.seed)
+
 	loop = 0
 	while running:
 		loop += 1
 		if args.loops > 0 and loop > args.loops:
 			break
 
-		scenario_name = args.scenario or random.choice(list(scenarios.keys()))
+		scenario_name = args.scenario or master_rng.choice(list(scenarios.keys()))
 		effective_profiles = sample_scenario(
-			scenario_name, scenarios[scenario_name], profiles
+			scenario_name, scenarios[scenario_name], profiles, master_rng
 		)
 		logger.info('--- Loop %d | scenario=%s ---', loop, scenario_name)
 
 		slice_results: dict[str, list] = {}
 		failed_slices: list[str] = []
 
-		def run_and_collect(name, prof, net, dur, pid, scen):
-			result = run_slice(name, prof, net, dur, pid, scen)
+		def run_and_collect(name, prof, net, dur, pid, scen, rng):
+			result = run_slice(name, prof, net, dur, pid, scen, rng)
 			if all('error' in r for r in result):
 				failed_slices.append(name)
 			slice_results[name] = result
@@ -789,6 +804,11 @@ def main():
 				failed_slices.append(name)
 				continue
 			dur = profiles[name].get('duration_sec', default_duration)
+			slice_rng = (
+				random.Random(f'{args.seed}:{loop}:{name}')
+				if args.seed is not None
+				else random.Random()
+			)
 			t = threading.Thread(
 				target=run_and_collect,
 				args=(
@@ -798,6 +818,7 @@ def main():
 					dur,
 					slice_pids[name],
 					scenario_name,
+					slice_rng,
 				),
 				daemon=True,
 			)
