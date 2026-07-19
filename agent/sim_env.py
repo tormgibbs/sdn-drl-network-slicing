@@ -113,6 +113,7 @@ class SimCampusEnv(gym.Env):
 		self._on_off_timer: dict[str, float] = {}
 		self._scenario: str = 'normal'
 		self._factors: dict[str, float] = {}
+		self._last_metrics: dict = {}
 		self._base_latency_ms: dict[str, float] = {}
 
 	def _sample_scenario(self) -> None:
@@ -173,7 +174,6 @@ class SimCampusEnv(gym.Env):
 				loss_pct = 0.0
 				utilisation = offered / ceiling_bps
 
-			# Latency rises slightly under high utilisation — emulates kernel forwarding pressure
 			latency_ms = self._base_latency_ms[name] * (1.0 + 0.5 * utilisation)
 			latency_ms += self.np_random.normal(0, 2.0)
 			latency_ms = max(1.0, latency_ms)
@@ -183,6 +183,7 @@ class SimCampusEnv(gym.Env):
 				'loss_pct': loss_pct,
 				'tx_throughput_bps': min(offered, ceiling_bps),
 			}
+		self._last_metrics = metrics
 		return metrics
 
 	def _build_observation(self, metrics: dict) -> np.ndarray:
