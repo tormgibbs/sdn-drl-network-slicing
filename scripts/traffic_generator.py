@@ -728,6 +728,8 @@ def save_results(results: list[dict], output_dir: Path) -> None:
 
 def main():
 	profiles, defaults, scenarios = load_traffic_config()
+	resolved_name = TRAFFIC_CONFIG_PATH.resolve().name
+	logger.info('Using traffic profile: %s', resolved_name)
 	parser = argparse.ArgumentParser(
 		description='Per-slice bidirectional iperf3 traffic generator'
 	)
