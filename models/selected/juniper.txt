@@ -1,0 +1,1 @@
+Source: models/trained/hawthorn/ppo_slicing_1120000.zip (timesteps=1120000, ep_rew_mean=364.5)

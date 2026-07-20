@@ -1,0 +1,1 @@
+Source: models/trained/ironwood/final.zip (timesteps=1944000, best aggregate reward, delta=0.10 stalled, delta=0.15/0.20 still improving)
