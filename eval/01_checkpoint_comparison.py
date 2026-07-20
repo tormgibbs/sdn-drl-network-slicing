@@ -5,12 +5,17 @@ using a shared seed sequence so every checkpoint is scored against the exact
 same episodes (paired comparison -> much lower variance than independent
 random rollouts per checkpoint).
 
+Checkpoints are evaluated in parallel (one process per checkpoint) since
+each is fully independent -- no shared state.
+
 USAGE:
     uv run python 01_checkpoint_comparison.py --models-root models/ironwood \
         --checkpoints ppo_slicing_80000 ppo_slicing_160000 final --n-episodes 1000
 """
 
 import argparse
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import yaml
@@ -49,18 +54,37 @@ def main() -> None:
 		help='checkpoint filenames without .zip, e.g. ppo_slicing_80000 final',
 	)
 	parser.add_argument('--n-episodes', type=int, default=1000)
+	parser.add_argument(
+		'--max-workers',
+		type=int,
+		default=None,
+		help='defaults to min(len(checkpoints), cpu count)',
+	)
 	args = parser.parse_args()
-
 	slices_cfg = yaml.safe_load(open(args.slices_config))
 	seeds = list(range(args.n_episodes))
 
+	max_workers = args.max_workers or min(len(args.checkpoints), os.cpu_count() or 1)
+	print(
+		f'Running {len(args.checkpoints)} checkpoints across {max_workers} workers...',
+		flush=True,
+	)
+
 	results = {}
-	for ckpt in args.checkpoints:
-		try:
-			r = run_checkpoint(f'{args.models_root}/{ckpt}', slices_cfg, seeds)
-			results[ckpt] = r
-		except Exception as e:
-			print(f'{ckpt:<25} FAILED: {e}')
+	with ProcessPoolExecutor(max_workers=max_workers) as executor:
+		futures = {
+			executor.submit(
+				run_checkpoint, f'{args.models_root}/{ckpt}', slices_cfg, seeds
+			): ckpt
+			for ckpt in args.checkpoints
+		}
+		for future in as_completed(futures):
+			ckpt = futures[future]
+			try:
+				results[ckpt] = future.result()
+				print(f'Finished {ckpt}', flush=True)
+			except Exception as e:
+				print(f'{ckpt:<25} FAILED: {e}')
 
 	print(f'\n=== Unpaired stats (n={args.n_episodes} episodes each) ===')
 	for ckpt, r in results.items():
