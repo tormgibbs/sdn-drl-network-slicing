@@ -1,20 +1,23 @@
 # 03_reward_delta_grid.py
 """
-Compare the policy's chosen allocation against a grid of counter-allocations
-(shift X% from one slice to another), scored via the REAL reward function on
-REAL in-distribution rollout states -- not synthetic observations.
+Compare each given checkpoint's chosen allocation against a grid of
+counter-allocations, scored via the REAL reward function on REAL
+in-distribution rollout states. Multiple --model-path values run in
+parallel (one process per model, independent -- no shared state).
 
 IMPORTANT: reads env._last_metrics (cached by reset()/step()), never calls
 env._compute_metrics() directly -- that has a side effect (advances on/off
 timers) and would score against a different tick than the policy observed.
 
 USAGE:
-    uv run python 03_reward_delta_grid.py --model-path models/ironwood/final \
-        --n-episodes 2000 --counters VLE:SP VLE:admin admin:SP \
-        --sweep-counter VLE:SP --sweep-sizes 0.03 0.05 0.10 0.15 0.20
+    uv run python 03_reward_delta_grid.py \
+        --model-path models/ironwood/ppo_slicing_640000 models/ironwood/ppo_slicing_800000 \
+        --n-episodes 1500
 """
 
 import argparse
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import yaml
@@ -55,10 +58,7 @@ def make_counter(fracs, from_idx, to_idx, delta=0.10):
 	return [x / s for x in c]
 
 
-def parse_counters(
-	pairs: list[str], slice_order: list[str]
-) -> dict[str, tuple[int, int]]:
-	"""Parse 'FROM:TO' strings (slice names) into {label: (from_idx, to_idx)}."""
+def parse_counters(pairs, slice_order):
 	result = {}
 	for pair in pairs:
 		frm, to = pair.split(':')
@@ -69,55 +69,32 @@ def parse_counters(
 	return result
 
 
-def main() -> None:
-	parser = argparse.ArgumentParser(
-		description='Reward-delta grid vs counter-allocations'
-	)
-	parser.add_argument('--slices-config', default='config/slices.yaml')
-	parser.add_argument('--model-path', required=True)
-	parser.add_argument('--n-episodes', type=int, default=2000)
-	parser.add_argument(
-		'--counters',
-		nargs='+',
-		default=[
-			'vle:student_portal',
-			'vle:admin',
-			'admin:student_portal',
-			'admin:vle',
-			'general:student_portal',
-			'general:vle',
-		],
-		help='FROM:TO slice-name pairs, e.g. vle:student_portal',
-	)
-	parser.add_argument(
-		'--sweep-counter',
-		default='vle:student_portal',
-		help='FROM:TO pair to run the step-size sweep on',
-	)
-	parser.add_argument(
-		'--sweep-sizes', nargs='+', type=float, default=[0.03, 0.05, 0.10, 0.15, 0.20]
-	)
-	parser.add_argument('--sweep-episodes', type=int, default=500)
-	args = parser.parse_args()
-
-	slices_cfg_full = yaml.safe_load(open(args.slices_config))
+def run_analysis(
+	model_path: str,
+	slices_cfg_full: dict,
+	counter_pairs: list[str],
+	sweep_counter: str,
+	sweep_sizes: list[float],
+	n_episodes: int,
+	sweep_episodes: int,
+) -> dict:
+	"""Runs the full delta grid + sweep for one model. Returns a results dict."""
 	slice_order = slices_cfg_full['slice_order']
 	slices_cfg = slices_cfg_full['slices']
 	C_kbps = slices_cfg_full['network']['total_bandwidth_bps'] // 1000
 	floors_kbps = [
 		max(1, slices_cfg[n]['min_throughput_bps'] // 1000) for n in slice_order
 	]
+	counters = parse_counters(counter_pairs, slice_order)
 
-	counters = parse_counters(args.counters, slice_order)
-
-	model = PPO.load(args.model_path)
+	model = PPO.load(model_path)
 	env = SimCampusEnv(slices_cfg_full)
 
 	counter_wins = {k: 0 for k in counters}
 	counter_deltas = {k: [] for k in counters}
 	found = 0
 
-	for _ in range(args.n_episodes):
+	for _ in range(n_episodes):
 		obs, _ = env.reset()
 		metrics = env._last_metrics
 		action, _ = model.predict(obs, deterministic=True)
@@ -138,31 +115,14 @@ def main() -> None:
 			if r_c > r_policy:
 				counter_wins[name] += 1
 
-	print(f'=== Delta analysis over {found} episodes ===')
-	print(
-		f'{"Counter":<25} {"win_rate":<10} {"mean_delta":<12} {"median_delta":<14} {"mean_win_delta"}'
+	sweep_key = sweep_counter.replace(':', '->')
+	fi, ti = (
+		counters.get(sweep_key) or parse_counters([sweep_counter], slice_order)[sweep_key]
 	)
-	print('-' * 75)
-	for name, deltas in counter_deltas.items():
-		d = np.array(deltas)
-		wins = (d > 0).mean()
-		mean_win = d[d > 0].mean() if (d > 0).any() else 0.0
-		print(
-			f'{name:<25} {wins:<10.1%} {d.mean():<12.5f} {np.median(d):<14.5f} {mean_win:.5f}'
-		)
-
-	fi, ti = counters.get(
-		args.sweep_counter.replace(':', '->'),
-		parse_counters([args.sweep_counter], slice_order)[
-			args.sweep_counter.replace(':', '->')
-		],
-	)
-	print(f'\n=== {args.sweep_counter} step-size sweep ===')
-	print(f'{"delta":<10} {"win_rate":<12} {"mean_delta"}')
-	print('-' * 35)
-	for delta in args.sweep_sizes:
+	sweep_results = []
+	for delta in sweep_sizes:
 		wins, deltas = 0, []
-		for _ in range(args.sweep_episodes):
+		for _ in range(sweep_episodes):
 			obs, _ = env.reset()
 			metrics = env._last_metrics
 			action, _ = model.predict(obs, deterministic=True)
@@ -179,7 +139,112 @@ def main() -> None:
 			if r_c > r_policy:
 				wins += 1
 		d = np.array(deltas)
-		print(f'{delta:<10} {wins / len(deltas):<12.1%} {d.mean():.5f}')
+		sweep_results.append((delta, wins / len(deltas), d.mean()))
+
+	return {
+		'found': found,
+		'counter_wins': counter_wins,
+		'counter_deltas': counter_deltas,
+		'sweep_results': sweep_results,
+		'sweep_counter': sweep_counter,
+	}
+
+
+def main() -> None:
+	parser = argparse.ArgumentParser(
+		description='Reward-delta grid vs counter-allocations, multi-model'
+	)
+	parser.add_argument('--slices-config', default='config/slices.yaml')
+	parser.add_argument(
+		'--model-path',
+		nargs='+',
+		required=True,
+		help='one or more checkpoint paths, evaluated in parallel',
+	)
+	parser.add_argument('--n-episodes', type=int, default=2000)
+	parser.add_argument(
+		'--counters',
+		nargs='+',
+		default=[
+			'vle:student_portal',
+			'vle:admin',
+			'admin:student_portal',
+			'admin:vle',
+			'general:student_portal',
+			'general:vle',
+		],
+	)
+	parser.add_argument('--sweep-counter', default='vle:student_portal')
+	parser.add_argument(
+		'--sweep-sizes', nargs='+', type=float, default=[0.03, 0.05, 0.10, 0.15, 0.20]
+	)
+	parser.add_argument('--sweep-episodes', type=int, default=500)
+	parser.add_argument('--max-workers', type=int, default=None)
+	args = parser.parse_args()
+
+	slices_cfg_full = yaml.safe_load(open(args.slices_config))
+	max_workers = args.max_workers or min(len(args.model_path), os.cpu_count() or 1)
+	print(
+		f'Running {len(args.model_path)} model(s) across {max_workers} workers...',
+		flush=True,
+	)
+
+	all_results = {}
+	with ProcessPoolExecutor(max_workers=max_workers) as executor:
+		futures = {
+			executor.submit(
+				run_analysis,
+				path,
+				slices_cfg_full,
+				args.counters,
+				args.sweep_counter,
+				args.sweep_sizes,
+				args.n_episodes,
+				args.sweep_episodes,
+			): path
+			for path in args.model_path
+		}
+		for future in as_completed(futures):
+			path = futures[future]
+			try:
+				all_results[path] = future.result()
+				print(f'Finished {path}', flush=True)
+			except Exception as e:
+				print(f'{path:<40} FAILED: {e}')
+
+	for path, res in all_results.items():
+		print(f'\n{"=" * 70}\n{path}\n{"=" * 70}')
+		print(f'=== Delta analysis over {res["found"]} episodes ===')
+		print(
+			f'{"Counter":<25} {"win_rate":<10} {"mean_delta":<12} {"median_delta":<14} {"mean_win_delta"}'
+		)
+		print('-' * 75)
+		for name, deltas in res['counter_deltas'].items():
+			d = np.array(deltas)
+			wins = (d > 0).mean()
+			mean_win = d[d > 0].mean() if (d > 0).any() else 0.0
+			print(
+				f'{name:<25} {wins:<10.1%} {d.mean():<12.5f} {np.median(d):<14.5f} {mean_win:.5f}'
+			)
+
+		print(f'\n=== {res["sweep_counter"]} step-size sweep ===')
+		print(f'{"delta":<10} {"win_rate":<12} {"mean_delta"}')
+		print('-' * 35)
+		for delta, win_rate, mean_delta in res['sweep_results']:
+			print(f'{delta:<10} {win_rate:<12.1%} {mean_delta:.5f}')
+
+	# Cross-model trend summary for the sweep counter, easy to eyeball together
+	if len(all_results) > 1:
+		print(
+			f'\n{"=" * 70}\nTREND SUMMARY: {args.sweep_counter} win_rate by delta, across models\n{"=" * 70}'
+		)
+		header = f'{"model":<45}' + ''.join(f'{d:<8}' for d in args.sweep_sizes)
+		print(header)
+		for path, res in all_results.items():
+			row = f'{path:<45}'
+			for _, win_rate, _ in res['sweep_results']:
+				row += f'{win_rate:<8.1%}'
+			print(row)
 
 
 if __name__ == '__main__':
