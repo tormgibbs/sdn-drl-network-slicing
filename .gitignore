@@ -15,4 +15,4 @@ infrastructure/free5gc/cert/
 config/slice_pids.json
 .vscode
 
-!models/**/*.zip
+!models/selected/*.zip
