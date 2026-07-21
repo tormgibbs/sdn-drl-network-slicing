@@ -1,6 +1,5 @@
 .env
 results/*/
-models/*.zip
 __pycache__/
 *.pyc
 *.pyo
@@ -15,3 +14,5 @@ infrastructure/free5gc/cert/
 *.zip
 config/slice_pids.json
 .vscode
+
+!models/**/*.zip
