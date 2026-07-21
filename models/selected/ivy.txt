@@ -1,0 +1,1 @@
+Source: models/trained/hawthorn/final.zip (timesteps=1464000, ep_rew_mean=365.8, explained_variance=0.888)

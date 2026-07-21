@@ -1,0 +1,45 @@
+diff --git a/src/iperf.h b/src/iperf.h
+index 1371abd..19291ee 100644
+--- a/src/iperf.h
++++ b/src/iperf.h
+@@ -233,6 +233,8 @@ struct iperf_stream
+     int64_t   omitted_packet_count;
+     double    jitter;
+     double    prev_transit;
++    double    transit_sum;
++    int64_t   transit_count;
+     int64_t   outoforder_packets;
+     int64_t   omitted_outoforder_packets;
+     int64_t   cnt_error;
+diff --git a/src/iperf_api.c b/src/iperf_api.c
+index b413687..6a7c549 100644
+--- a/src/iperf_api.c
++++ b/src/iperf_api.c
+@@ -4672,7 +4672,13 @@ print_interval_results(struct iperf_test *test, struct iperf_stream *sp, cJSON *
+ 		lost_percent = 0.0;
+ 	    }
+ 	    if (test->json_output)
+-		cJSON_AddItemToArray(json_interval_streams, iperf_json_printf("socket: %d  start: %f  end: %f  seconds: %f  bytes: %d  bits_per_second: %f  jitter_ms: %f  lost_packets: %d  packets: %d  lost_percent: %f  omitted: %b sender: %b", (int64_t) sp->socket, (double) st, (double) et, (double) irp->interval_duration, (int64_t) irp->bytes_transferred, bandwidth * 8, (double) irp->jitter * 1000.0, (int64_t) irp->interval_cnt_error, (int64_t) irp->interval_packet_count, (double) lost_percent, irp->omitted, sp->sender));
++		if (test->json_output) {
++			double mean_transit_ms = (sp->transit_count > 0) ? (sp->transit_sum / sp->transit_count) * 1000.0 : 0.0;
++			sp->transit_sum = 0.0;
++			sp->transit_count = 0;
++			cJSON_AddItemToArray(json_interval_streams, iperf_json_printf("socket: %d  start: %f  end: %f  seconds: %f  bytes: %d  bits_per_second: %f  jitter_ms: %f  lost_packets: %d  packets: %d  lost_percent: %f  omitted: %b sender: %b  mean_transit_ms: %f", (int64_t) sp->socket, (double) st, (double) et, (double) irp->interval_duration, (int64_t) irp->bytes_transferred, bandwidth * 8, (double) irp->jitter * 1000.0, (int64_t) irp->interval_cnt_error, (int64_t) irp->interval_packet_count, (double) lost_percent, irp->omitted, sp->sender, (double) mean_transit_ms));
++		} else
++			cJSON_AddItemToArray(json_interval_streams, iperf_json_printf("socket: %d  start: %f  end: %f  seconds: %f  bytes: %d  bits_per_second: %f  jitter_ms: %f  lost_packets: %d  packets: %d  lost_percent: %f  omitted: %b sender: %b", (int64_t) sp->socket, (double) st, (double) et, (double) irp->interval_duration, (int64_t) irp->bytes_transferred, bandwidth * 8, (double) irp->jitter * 1000.0, (int64_t) irp->interval_cnt_error, (int64_t) irp->interval_packet_count, (double) lost_percent, irp->omitted, sp->sender));
+ 	    else
+ 		iperf_printf(test, report_bw_udp_format, sp->socket, mbuf, st, et, ubuf, nbuf, irp->jitter * 1000.0, irp->interval_cnt_error, irp->interval_packet_count, lost_percent, irp->omitted?report_omitted:"");
+ 	}
+diff --git a/src/iperf_udp.c b/src/iperf_udp.c
+index c8835e6..ac59723 100644
+--- a/src/iperf_udp.c
++++ b/src/iperf_udp.c
+@@ -193,6 +193,8 @@ iperf_udp_recv(struct iperf_stream *sp)
+ 	    d = -d;
+ 	sp->prev_transit = transit;
+ 	sp->jitter += (d - sp->jitter) / 16.0;
++	sp->transit_sum += transit;
++	sp->transit_count += 1;
+     }
+     else {
+ 	if (test->debug_level >= DEBUG_LEVEL_INFO)

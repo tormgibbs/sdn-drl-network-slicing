@@ -3,6 +3,7 @@
 # Three-tier campus network topology. Core (s1), aggregation (s2, s3), access (ap1-ap5).
 
 
+import json
 import sys
 from pathlib import Path
 
@@ -155,14 +156,39 @@ def create_topology():
 	sta9.cmd('arp -s 10.60.5.1 02:00:00:00:0c:00')
 
 	info('*** Starting iperf3 servers\n')
-	sta1.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta1-5201.log')
-	sta1.cmd('iperf3 -s -p 5202 -D --logfile /tmp/iperf3-sta1-5202.log')
-	sta3.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta3-5201.log')
-	sta3.cmd('iperf3 -s -p 5202 -D --logfile /tmp/iperf3-sta3-5202.log')
-	sta5.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta5.log')
-	sta7.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta7.log')
-	sta9.cmd('iperf3 -s -D --logfile /tmp/iperf3-sta9.log')
 
+	def start_iperf3_loop(node, port, logfile):
+		# -1 avoids the abnormal-disconnect wedge (esnet/iperf#416), but the
+		# server can still hang while printing its report after a completed
+		# transfer (esnet/iperf#1735, unresolved upstream) -- timeout forces
+		# a kill so the loop can respawn instead of staying stuck.
+		cmd = (
+			f'while true; do timeout 90s iperf3 -s -1 -p {port} '
+			f'-i 1 --json-stream --forceflush; '
+			f'done > {logfile} 2>&1 &'
+		)
+		node.cmd(cmd)
+
+	start_iperf3_loop(sta1, 5201, '/tmp/iperf3-sta1-5201.log')
+	start_iperf3_loop(sta1, 5202, '/tmp/iperf3-sta1-5202.log')
+	start_iperf3_loop(sta3, 5201, '/tmp/iperf3-sta3-5201.log')
+	start_iperf3_loop(sta3, 5202, '/tmp/iperf3-sta3-5202.log')
+	start_iperf3_loop(sta5, 5201, '/tmp/iperf3-sta5-5201.log')
+	start_iperf3_loop(sta7, 5201, '/tmp/iperf3-sta7-5201.log')
+	start_iperf3_loop(sta9, 5201, '/tmp/iperf3-sta9-5201.log')
+
+	slice_sta_pids = {
+		'vle': sta1.pid,
+		'student_portal': sta3.pid,
+		'admin': sta5.pid,
+		'iot': sta7.pid,
+		'general': sta9.pid,
+	}
+	pid_path = Path('config/slice_pids.json')
+	pid_path.parent.mkdir(parents=True, exist_ok=True)
+	with open(pid_path, 'w') as f:
+		json.dump(slice_sta_pids, f, indent=2)
+	info(f'*** Slice PID map written to {pid_path}\n')
 
 	info('*** Verifying topology\n')
 	for node in [s1, s2, s3, ap1, ap2, ap3, ap4, ap5]:

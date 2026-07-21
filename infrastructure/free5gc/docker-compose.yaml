@@ -242,8 +242,10 @@ services:
 
   ueransim:
     container_name: ueransim
-    image: tormgibbs/ueransim:aether
+    image: tormgibbs/ueransim:coral
     command: ./nr-gnb -c ./config/gnbcfg.yaml
+    cpuset: "0,1"
+    cpu_shares: 2048
     volumes:
       - ./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml
       - ./config/uecfg.yaml:/ueransim/config/uecfg.yaml

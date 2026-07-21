@@ -1,0 +1,48 @@
+diff --git a/src/gtpu/encap.c b/src/gtpu/encap.c
+index 233e7c5..beebf92 100644
+--- a/src/gtpu/encap.c
++++ b/src/gtpu/encap.c
+@@ -996,7 +996,7 @@ static struct rtable *find_ip4_route(struct flowi4 *fl4,
+     fl4->flowi4_oif = sk->sk_bound_dev_if;
+     fl4->daddr = daddr;
+     fl4->saddr = saddr;
+-    fl4->flowi4_tos = RT_TOS(inet_sk(sk)->tos);
++	fl4->flowi4_dscp = inet_dsfield_to_dscp(RT_TOS(inet_sk(sk)->tos));
+     fl4->flowi4_proto = sk->sk_protocol;
+     return ip_route_output_key(sock_net(sk), fl4);
+ }
+diff --git a/src/gtpu/pktinfo.c b/src/gtpu/pktinfo.c
+index e3e4c7f..893b27f 100644
+--- a/src/gtpu/pktinfo.c
++++ b/src/gtpu/pktinfo.c
+@@ -74,7 +74,7 @@ struct rtable *ip4_find_route(struct sk_buff *skb, struct iphdr *iph,
+     fl4->flowi4_oif = sk->sk_bound_dev_if;
+     fl4->daddr = daddr;
+     fl4->saddr = (saddr ? saddr : inet_sk(sk)->inet_saddr);
+-    fl4->flowi4_tos = RT_TOS(inet_sk(sk)->tos) | sock_flag(sk, SOCK_LOCALROUTE);
++	fl4->flowi4_dscp = inet_dsfield_to_dscp(RT_TOS(inet_sk(sk)->tos)) | sock_flag(sk, SOCK_LOCALROUTE);
+     fl4->flowi4_proto = sk->sk_protocol;
+ 
+     rt = ip_route_output_key(dev_net(gtp_dev), fl4);
+@@ -136,7 +136,7 @@ struct rtable *ip4_find_route_simple(struct sk_buff *skb,
+     fl4->flowi4_oif = sk->sk_bound_dev_if;
+     fl4->daddr = daddr;
+     fl4->saddr = (saddr ? saddr : inet_sk(sk)->inet_saddr);
+-    fl4->flowi4_tos = RT_TOS(inet_sk(sk)->tos) | sock_flag(sk, SOCK_LOCALROUTE);
++	fl4->flowi4_dscp = inet_dsfield_to_dscp(RT_TOS(inet_sk(sk)->tos)) | sock_flag(sk, SOCK_LOCALROUTE);
+     fl4->flowi4_proto = sk->sk_protocol;
+ 
+     rt = ip_route_output_key(dev_net(gtp_dev), fl4);
+diff --git a/src/pfcp/pdr.c b/src/pfcp/pdr.c
+index 7af4d75..cad6170 100644
+--- a/src/pfcp/pdr.c
++++ b/src/pfcp/pdr.c
+@@ -151,7 +151,7 @@ int unix_sock_client_new(struct pdr *pdr)
+         return err;
+     }
+ 
+-    err = (*psock)->ops->connect(*psock, (struct sockaddr *)addr,
++	err = kernel_connect(*psock, (struct sockaddr_unsized *)addr,
+             sizeof(addr->sun_family) + strlen(addr->sun_path), 0);
+     if (err) {
+         unix_sock_client_delete(pdr);

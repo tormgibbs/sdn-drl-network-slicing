@@ -1,4 +1,12 @@
 # infrastructure/controller/queue_manager.py
+# NOTE: HTB queue enforcement at AP uplink ports is structurally non-functional.
+# OpenFlow meters at s2/s3 drop packets before they reach AP egress interfaces,
+# so HTB floor classes never receive traffic. Floor guarantees are enforced via
+# action-space projection in agent/project_allocation.py instead.
+# See docs/design-note-htb-floor-removal.md for full reasoning.
+# This module is retained in case OVS QoS configuration is needed in future.
+
+
 # Creates and updates HTB QoS queues on AP uplink ports via ovs-vsctl.
 import logging
 import subprocess

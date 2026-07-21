@@ -1,3 +1,5 @@
+slice_order: [vle, student_portal, admin, iot, general]
+
 slices:
   vle:
     vlan: 10
@@ -7,12 +9,13 @@ slices:
     sst: 1
     sd: "000001"
     ue_subnet: 10.60.1.0/24
-    min_throughput_bps: 50_000_000
+    min_throughput_bps: 5_000_000
     max_latency_ms: 100
     max_loss_pct: 0.5
     sink_ip: 10.0.1.1
     probe_interface: ue1tun0
-
+    dl_port: 5301
+    sta: sta1
   student_portal:
     vlan: 20
     ssid: student-portal
@@ -21,12 +24,13 @@ slices:
     sst: 1
     sd: "000002"
     ue_subnet: 10.60.2.0/24
-    min_throughput_bps: 25_000_000
+    min_throughput_bps: 3_000_000
     max_latency_ms: 50
     max_loss_pct: 0.1
     sink_ip: 10.0.2.1
     probe_interface: ue2tun0
-
+    dl_port: 5301
+    sta: sta3
   admin:
     vlan: 30
     ssid: admin
@@ -35,12 +39,13 @@ slices:
     sst: 1
     sd: "000003"
     ue_subnet: 10.60.3.0/24
-    min_throughput_bps: 10_000_000
+    min_throughput_bps: 2_000_000
     max_latency_ms: 150
     max_loss_pct: 1.0
     sink_ip: 10.0.3.1
     probe_interface: ue3tun0
-
+    dl_port: 5301
+    sta: sta5
   iot:
     vlan: 40
     ssid: iot
@@ -54,7 +59,8 @@ slices:
     max_loss_pct: 5.0
     sink_ip: 10.0.4.1
     probe_interface: ue4tun0
-
+    dl_port: 5301
+    sta: sta7
   general:
     vlan: 50
     ssid: general
@@ -63,11 +69,13 @@ slices:
     sst: 1
     sd: "000005"
     ue_subnet: 10.60.5.0/24
-    min_throughput_bps: 5_000_000
+    min_throughput_bps: 1_000_000
     max_latency_ms: 500
     max_loss_pct: 10.0
     sink_ip: 10.0.5.1
     probe_interface: ue5tun0
+    dl_port: 5301
+    sta: sta9
 
 network:
   total_bandwidth_bps: 100_000_000

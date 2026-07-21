@@ -30,12 +30,12 @@ from infrastructure.controller.flow_manager import (
 	set_dpid_map,
 )
 from infrastructure.controller.meter_manager import MeterManager
-from infrastructure.controller.queue_manager import create_htb_queue
 from infrastructure.controller.rest_api import registry, start_api_server
 from infrastructure.controller.stats_collector import StatsCollector
 
 DPID_MAP_PATH = 'config/dpid_map.json'
 SLICES_CONFIG_PATH = 'config/slices.yaml'
+TOPOLOGY_CONFIG_PATH = 'config/topology.yaml'
 
 
 def load_dpid_map() -> dict[int, str]:
@@ -53,6 +53,11 @@ def load_ap_vlan_map() -> dict[str, int]:
 		config = yaml.safe_load(f)
 	return {slice_cfg['ap']: slice_cfg['vlan'] for slice_cfg in config['slices'].values()}
 
+def load_stats_interval() -> int:
+	with open(TOPOLOGY_CONFIG_PATH) as f:
+		config = yaml.safe_load(f)
+	return config['controller']['stats_interval_sec']
+
 
 class CampusController(app_manager.OSKenApp):
 	OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -65,7 +70,7 @@ class CampusController(app_manager.OSKenApp):
 		set_dpid_map(self.dpid_to_name)
 		set_ap_vlan_map(load_ap_vlan_map())
 		self.meter_manager = MeterManager()
-		self.stats_collector = StatsCollector(interval_sec=5)
+		self.stats_collector = StatsCollector(interval_sec=load_stats_interval())
 		self.stats_collector.start()
 		registry.register(self.stats_collector, self.meter_manager)
 		start_api_server(host='0.0.0.0', port=8080)
@@ -97,7 +102,6 @@ class CampusController(app_manager.OSKenApp):
 				self.logger.error('No VLAN configured for AP %s', ap_name)
 				return
 			install_ap_rules(datapath, ap_name, vlan_id)
-			create_htb_queue(ap_name)
 		else:
 			self.logger.warning('Unknown switch: dpid=%s', dpid)
 			install_table_miss(datapath)
@@ -111,8 +115,8 @@ class CampusController(app_manager.OSKenApp):
 			self.stats_collector.handle_port_stats_reply(name, ev.msg.body)
 
 	@set_ev_cls(
-			ofp_event.EventOFPPortDescStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
-		)
+		ofp_event.EventOFPPortDescStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
+	)
 	def port_desc_reply_handler(self, ev):
 		datapath = ev.msg.datapath
 		if not is_core(datapath.id):
@@ -154,5 +158,9 @@ class CampusController(app_manager.OSKenApp):
 		name = self.dpid_to_name.get(dpid, f'unknown({dpid})')
 		self.logger.error(
 			'OFPErrorMsg: dpid=%s name=%s type=0x%02x code=0x%02x data=%s',
-			dpid, name, msg.type, msg.code, msg.data,
+			dpid,
+			name,
+			msg.type,
+			msg.code,
+			msg.data,
 		)

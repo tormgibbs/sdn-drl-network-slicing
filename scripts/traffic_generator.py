@@ -13,13 +13,18 @@ import signal
 import subprocess
 import threading
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
+CONTROLLER_HEALTH_URL = 'http://localhost:8080/health'
 LOG_DIR = Path('logs/traffic')
-CONFIG_PATH = Path('config/traffic.yaml')
+TRAFFIC_CONFIG_PATH = Path('config/traffic.yaml')
+SLICES_CONFIG_PATH = Path('config/slices.yaml')
+SLICE_PIDS_PATH = Path('config/slice_pids.json')
+UE_PROFILES_PATH = Path('config/ue_profiles.yaml')
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -27,23 +32,330 @@ logging.basicConfig(
 )
 logger = logging.getLogger('traffic_generator')
 
-SLICE_NETWORK = {
-	'vle': {'tunnel': 'ue1tun0', 'bind_ip': '10.60.1.1', 'server_ip': '10.0.1.1'},
-	'student_portal': {
-		'tunnel': 'ue2tun0',
-		'bind_ip': '10.60.2.1',
-		'server_ip': '10.0.2.1',
-	},
-	'admin': {'tunnel': 'ue3tun0', 'bind_ip': '10.60.3.1', 'server_ip': '10.0.3.1'},
-	'iot': {'tunnel': 'ue4tun0', 'bind_ip': '10.60.4.1', 'server_ip': '10.0.4.1'},
-	'general': {'tunnel': 'ue5tun0', 'bind_ip': '10.60.5.1', 'server_ip': '10.0.5.1'},
-}
 
-
-def load_config() -> tuple[dict, dict]:
-	with open(CONFIG_PATH) as f:
+def load_traffic_config() -> tuple[dict, dict, dict]:
+	with open(TRAFFIC_CONFIG_PATH) as f:
 		config = yaml.safe_load(f)
-	return config['traffic_profiles'], config.get('defaults', {})
+	return (
+		config['traffic_profiles'],
+		config.get('defaults', {}),
+		config.get('scenarios', {}),
+	)
+
+
+def load_slice_network() -> dict:
+	with open(SLICES_CONFIG_PATH) as f:
+		config = yaml.safe_load(f)
+	network = {}
+	for name, s in config['slices'].items():
+		ue_ip = s['ue_subnet'].replace('.0/24', '.1')
+		network[name] = {
+			'tunnel': s['probe_interface'],
+			'bind_ip': ue_ip,
+			'server_ip': s['sink_ip'],
+			'ue_ip': ue_ip,
+			'dl_port': s['dl_port'],
+			'sta': s['sta'],
+		}
+	return network
+
+
+def load_slice_pids() -> dict[str, int]:
+	if not SLICE_PIDS_PATH.exists():
+		raise RuntimeError(
+			f'Slice PID map not found at {SLICE_PIDS_PATH}. '
+			'Ensure campus_topology.py has started and written this file.'
+		)
+	with open(SLICE_PIDS_PATH) as f:
+		return json.load(f)
+
+
+def load_ue_identity() -> tuple[dict[str, str], dict[str, str]]:
+	with open(UE_PROFILES_PATH) as f:
+		config = yaml.safe_load(f)
+	slice_to_imsi = {}
+	slice_to_config_file = {}
+	for ue in config['ue_profiles'].values():
+		slice_to_imsi[ue['slice']] = ue['imsi']
+		slice_to_config_file[ue['slice']] = ue['config_file']
+	return slice_to_imsi, slice_to_config_file
+
+
+def _check_data_pending(imsi: str) -> bool:
+	result = subprocess.run(
+		[
+			'docker',
+			'exec',
+			'ueransim',
+			'/ueransim/nr-cli',
+			f'imsi-{imsi}',
+			'--exec',
+			'ps-list',
+		],
+		capture_output=True,
+		text=True,
+		timeout=5,
+	)
+	return 'data-pending: true' in result.stdout
+
+
+def _controller_owns_recovery() -> bool:
+	try:
+		with urllib.request.urlopen(CONTROLLER_HEALTH_URL, timeout=2) as resp:
+			return bool(json.loads(resp.read()).get('registry_frozen'))
+	except Exception:
+		return False
+
+
+def _wait_for_slice_recovery(
+	net: dict, timeout_sec: int = 60, poll_sec: int = 2
+) -> bool:
+	deadline = time.monotonic() + timeout_sec
+	while time.monotonic() < deadline:
+		result = subprocess.run(
+			[
+				'docker',
+				'exec',
+				'ueransim',
+				'ping',
+				'-I',
+				net['tunnel'],
+				'-c',
+				'1',
+				'-W',
+				'2',
+				net['server_ip'],
+			],
+			capture_output=True,
+		)
+		if result.returncode == 0:
+			return True
+		time.sleep(poll_sec)
+	return False
+
+
+def _recover_ue(imsi: str, config_file: str, iface: str, timeout_sec: int = 30) -> None:
+	subprocess.run(
+		[
+			'docker',
+			'exec',
+			'ueransim',
+			'/ueransim/nr-cli',
+			f'imsi-{imsi}',
+			'--exec',
+			'deregister switch-off',
+		],
+		capture_output=True,
+		timeout=10,
+	)
+	time.sleep(2)
+	subprocess.run(
+		[
+			'docker',
+			'exec',
+			'-d',
+			'ueransim',
+			'/ueransim/nr-ue',
+			'-c',
+			f'/ueransim/config/{config_file}',
+		],
+		capture_output=True,
+		timeout=10,
+	)
+	for _ in range(timeout_sec):
+		check = subprocess.run(
+			['docker', 'exec', 'ueransim', 'ip', 'link', 'show', iface],
+			capture_output=True,
+			timeout=5,
+		)
+		if check.returncode == 0:
+			return
+		time.sleep(1)
+	raise RuntimeError(f'{iface} did not reappear after recovering imsi-{imsi}')
+
+
+def sample_scenario(
+	scenario_name: str,
+	scenario_cfg: dict,
+	profiles: dict,
+	rng: random.Random,
+) -> dict:
+	effective = {}
+	for slice_name, profile in profiles.items():
+		factors = scenario_cfg.get(slice_name, {})
+		ul_lo, ul_hi = factors.get('ul_factor_range', [1.0, 1.0])
+		dl_lo, dl_hi = factors.get('dl_factor_range', [1.0, 1.0])
+		ul_factor = rng.uniform(ul_lo, ul_hi)
+		dl_factor = rng.uniform(dl_lo, dl_hi)
+
+		p = dict(profile)
+		if p.get('pattern') == 'mixed':
+			p['continuous_bps'] = int(profile['continuous_bps'] * ul_factor)
+			p['on_off_bps'] = int(profile['on_off_bps'] * ul_factor)
+			p['downlink_bps'] = int(profile['downlink_bps'] * dl_factor)
+			if 'downlink_on_off_bps' in profile:
+				p['downlink_on_off_bps'] = int(profile['downlink_on_off_bps'] * dl_factor)
+		else:
+			p['target_bps'] = int(profile['target_bps'] * ul_factor)
+			p['downlink_bps'] = int(
+				profile.get('downlink_bps', profile['target_bps']) * dl_factor
+			)
+
+		effective[slice_name] = p
+
+	return effective
+
+
+def verify_tunnels(
+	slice_network: dict,
+	slice_to_imsi: dict[str, str],
+	slice_to_config_file: dict[str, str],
+) -> None:
+	controller_owns_recovery = _controller_owns_recovery()
+	if controller_owns_recovery:
+		logger.info('Controller detected -- deferring tunnel recovery to stats_collector')
+
+	for slice_name, net in slice_network.items():
+		result = subprocess.run(
+			['docker', 'exec', 'ueransim', 'ip', 'link', 'show', net['tunnel']],
+			capture_output=True,
+			text=True,
+		)
+		if result.returncode != 0:
+			if controller_owns_recovery:
+				if not _wait_for_slice_recovery(net):
+					raise RuntimeError(
+						f'Tunnel {net["tunnel"]} for slice {slice_name} does not exist '
+						'and controller recovery did not restore it in time.'
+					)
+				logger.info('Slice %s tunnel recovered by controller.', slice_name)
+				continue
+			raise RuntimeError(
+				f'Tunnel {net["tunnel"]} for slice {slice_name} does not exist. '
+				'Ensure UE sessions are attached before starting traffic.'
+			)
+
+		ping_result = subprocess.run(
+			[
+				'docker',
+				'exec',
+				'ueransim',
+				'ping',
+				'-I',
+				net['tunnel'],
+				'-c',
+				'1',
+				'-W',
+				'2',
+				net['server_ip'],
+			],
+			capture_output=True,
+			text=True,
+		)
+
+		if ping_result.returncode != 0:
+			if controller_owns_recovery:
+				if not _wait_for_slice_recovery(net):
+					raise RuntimeError(
+						f'Slice {slice_name}: {net["server_ip"]} unreachable via '
+						f'{net["tunnel"]} and controller recovery did not clear it in time.'
+					)
+				logger.info('Slice %s recovered by controller.', slice_name)
+				continue
+
+			imsi = slice_to_imsi.get(slice_name)
+			config_file = slice_to_config_file.get(slice_name)
+			if imsi is None or config_file is None:
+				raise RuntimeError(
+					f'Slice {slice_name}: {net["server_ip"]} unreachable via '
+					f'{net["tunnel"]}, and no IMSI/config mapping available '
+					'to attempt recovery.'
+				)
+
+			stuck = _check_data_pending(imsi)
+			logger.warning(
+				'Slice %s: %s unreachable via %s (data-pending=%s) -- attempting recovery',
+				slice_name,
+				net['server_ip'],
+				net['tunnel'],
+				stuck,
+			)
+			_recover_ue(imsi, config_file, net['tunnel'])
+
+			retry = subprocess.run(
+				[
+					'docker',
+					'exec',
+					'ueransim',
+					'ping',
+					'-I',
+					net['tunnel'],
+					'-c',
+					'1',
+					'-W',
+					'2',
+					net['server_ip'],
+				],
+				capture_output=True,
+				text=True,
+			)
+			if retry.returncode != 0:
+				raise RuntimeError(
+					f'Slice {slice_name}: {net["server_ip"]} still unreachable '
+					f'via {net["tunnel"]} after recovery attempt.'
+				)
+			logger.info('Slice %s recovered successfully.', slice_name)
+
+	logger.info('All tunnels verified reachable.')
+
+
+def start_downlink_servers(slice_network: dict) -> None:
+	subprocess.run(
+		['docker', 'exec', 'ueransim', 'pkill', '-f', 'iperf3 -s'],
+		capture_output=True,
+	)
+	time.sleep(1)
+
+	for slice_name, net in slice_network.items():
+		# -B is required: without it iperf3 replies via the container default
+		# route instead of the GTP tunnel, breaking the downlink data path.
+		loop_cmd = (
+			f'while true; do timeout 90s iperf3 -s -1 -B {net["ue_ip"]} -p {net["dl_port"]} '
+			f'-i 1 --json-stream --forceflush; '
+			f'done > /tmp/iperf3-{net["tunnel"]}-dl.log 2>&1'
+		)
+		cmd = ['docker', 'exec', '-d', 'ueransim', 'bash', '-c', loop_cmd]
+		result = subprocess.run(cmd, capture_output=True, text=True)
+		if result.returncode != 0:
+			raise RuntimeError(
+				f'Failed to start downlink server for {slice_name}: {result.stderr.strip()}'
+			)
+
+	_wait_for_downlink_servers(slice_network)
+
+
+def _wait_for_downlink_servers(slice_network: dict, timeout_sec: int = 15) -> None:
+	deadline = time.monotonic() + timeout_sec
+	pending = {net['ue_ip']: net['dl_port'] for net in slice_network.values()}
+	while pending and time.monotonic() < deadline:
+		result = subprocess.run(
+			['docker', 'exec', 'ueransim', 'ss', '-lntp'],
+			capture_output=True,
+			text=True,
+		)
+		listening = result.stdout
+		pending = {
+			ip: port for ip, port in pending.items() if f'{ip}:{port}' not in listening
+		}
+		if pending:
+			time.sleep(0.5)
+
+	if pending:
+		raise RuntimeError(
+			f'Downlink servers did not come up within {timeout_sec}s '
+			f'for: {list(pending.keys())}'
+		)
+	logger.info('All downlink servers listening.')
 
 
 def _run_iperf3(
@@ -54,11 +366,14 @@ def _run_iperf3(
 	protocol: str,
 	target_bps: int,
 	packet_size: int | None = None,
-) -> dict:
+) -> tuple[dict, str, str]:
+	start = datetime.now(timezone.utc).isoformat()
 	cmd = [
 		'docker',
 		'exec',
 		'ueransim',
+		'timeout',
+		str(duration + 15),
 		'iperf3',
 		'-c',
 		server_ip,
@@ -77,19 +392,76 @@ def _run_iperf3(
 
 	result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 15)
 	if result.returncode != 0:
-		raise RuntimeError(result.stderr.strip())
-	return json.loads(result.stdout)
+		raise RuntimeError(
+			f'exit={result.returncode} stderr={result.stderr.strip()!r} '
+			f'stdout={result.stdout.strip()[:500]!r}'
+		)
+	end = datetime.now(timezone.utc).isoformat()
+	return json.loads(result.stdout), start, end
+
+
+def _run_iperf3_downlink(
+	sta_pid: int,
+	ue_ip: str,
+	port: int,
+	duration: int,
+	protocol: str,
+	target_bps: int,
+	packet_size: int | None = None,
+) -> tuple[dict, str, str]:
+	start = datetime.now(timezone.utc).isoformat()
+	# Mininet-WiFi stations don't have named namespaces in /var/run/netns/,
+	# so nsenter by PID is the only way in.
+	cmd = [
+		'nice',
+		'-n',
+		'10',
+		'nsenter',
+		'-t',
+		str(sta_pid),
+		'-n',
+		'timeout',
+		str(duration + 15),
+		'iperf3',
+		'-c',
+		ue_ip,
+		'-p',
+		str(port),
+		'-t',
+		str(duration),
+		'-J',
+	]
+	if protocol == 'udp':
+		cmd += ['-u', '-b', str(target_bps), '-l', str(packet_size or 1400)]
+	else:
+		cmd += ['-b', str(target_bps)]
+
+	result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 15)
+	if result.returncode != 0:
+		raise RuntimeError(
+			f'exit={result.returncode} stderr={result.stderr.strip()!r} '
+			f'stdout={result.stdout.strip()[:500]!r}'
+		)
+	end = datetime.now(timezone.utc).isoformat()
+	return json.loads(result.stdout), start, end
 
 
 def _extract_summary(
-	slice_name: str, protocol: str, data: dict, label: str = ''
+	slice_name: str,
+	protocol: str,
+	data: dict,
+	start_timestamp: str,
+	end_timestamp: str,
+	scenario: str,
+	label: str = '',
 ) -> dict:
-	ts = datetime.now(timezone.utc).isoformat()
 	end = data.get('end', {})
 	summary = {
 		'slice': slice_name,
 		'component': label or 'continuous',
-		'timestamp': ts,
+		'scenario': scenario,
+		'start_timestamp': start_timestamp,
+		'end_timestamp': end_timestamp,
 		'protocol': protocol,
 	}
 
@@ -114,10 +486,10 @@ def _extract_summary(
 
 
 def run_continuous_slice(
-	slice_name: str, profile: dict, network: dict, duration: int
+	slice_name: str, profile: dict, network: dict, duration: int, scenario: str
 ) -> list[dict]:
 	try:
-		data = _run_iperf3(
+		data, start, end = _run_iperf3(
 			bind_ip=network['bind_ip'],
 			server_ip=network['server_ip'],
 			port=profile.get('port', 5201),
@@ -126,17 +498,70 @@ def run_continuous_slice(
 			target_bps=profile['target_bps'],
 			packet_size=profile.get('packet_size'),
 		)
-		summary = _extract_summary(slice_name, profile['protocol'], data)
+		summary = _extract_summary(
+			slice_name, profile['protocol'], data, start, end, scenario
+		)
 		logger.info(
-			'%s: rx=%.2f Mbps loss=%.1f%%',
+			'%s uplink: rx=%.2f Mbps loss=%.1f%%',
 			slice_name,
 			summary.get('receiver_mbps', 0),
 			summary.get('loss_pct', 0),
 		)
 		return [summary]
 	except Exception as e:
-		logger.error('%s continuous failed: %s', slice_name, e)
-		return [{'slice': slice_name, 'component': 'continuous', 'error': str(e)}]
+		logger.error('%s uplink continuous failed: %s', slice_name, e)
+		return [
+			{
+				'slice': slice_name,
+				'component': 'continuous',
+				'scenario': scenario,
+				'error': str(e),
+			}
+		]
+
+
+def run_downlink_slice(
+	slice_name: str,
+	profile: dict,
+	network: dict,
+	duration: int,
+	sta_pid: int,
+	scenario: str,
+) -> list[dict]:
+	# Downlink target rate: use explicit downlink_bps if configured,
+	# otherwise match the uplink target. VLE and Student Portal are
+	# downlink-dominant in reality so downlink_bps should be set higher.
+	target_bps = profile.get('downlink_bps', profile.get('target_bps'))
+	try:
+		data, start, end = _run_iperf3_downlink(
+			sta_pid=sta_pid,
+			ue_ip=network['ue_ip'],
+			port=network['dl_port'],
+			duration=duration,
+			protocol=profile['protocol'],
+			target_bps=target_bps,
+			packet_size=profile.get('packet_size'),
+		)
+		summary = _extract_summary(
+			slice_name, profile['protocol'], data, start, end, scenario, label='downlink'
+		)
+		logger.info(
+			'%s downlink: rx=%.2f Mbps loss=%.1f%%',
+			slice_name,
+			summary.get('receiver_mbps', 0),
+			summary.get('loss_pct', 0),
+		)
+		return [summary]
+	except Exception as e:
+		logger.error('%s downlink failed: %s', slice_name, e)
+		return [
+			{
+				'slice': slice_name,
+				'component': 'downlink',
+				'scenario': scenario,
+				'error': str(e),
+			}
+		]
 
 
 def run_on_off_component(
@@ -145,16 +570,21 @@ def run_on_off_component(
 	network: dict,
 	duration: int,
 	stop_event: threading.Event,
+	scenario: str,
+	rng: random.Random,
 ) -> list[dict]:
 	results = []
 	elapsed = 0
+	min_on = profile.get('min_on_sec', 2)
+	min_off = profile.get('min_off_sec', 2)
+
 	while elapsed < duration and not stop_event.is_set():
-		on_sec = max(1, int(random.expovariate(1.0 / profile['mean_on_sec'])))
+		on_sec = max(min_on, int(rng.expovariate(1.0 / profile['mean_on_sec'])))
 		on_sec = min(on_sec, duration - elapsed)
 		if on_sec <= 0:
 			break
 		try:
-			data = _run_iperf3(
+			data, start, end = _run_iperf3(
 				bind_ip=network['bind_ip'],
 				server_ip=network['server_ip'],
 				port=profile.get('on_off_port', 5202),
@@ -162,20 +592,29 @@ def run_on_off_component(
 				protocol=profile['protocol'],
 				target_bps=profile['on_off_bps'],
 			)
-			summary = _extract_summary(slice_name, profile['protocol'], data, label='on_off')
+			summary = _extract_summary(
+				slice_name, profile['protocol'], data, start, end, scenario, label='on_off'
+			)
 			logger.info(
 				'%s on_off burst: rx=%.2f Mbps', slice_name, summary.get('receiver_mbps', 0)
 			)
 			results.append(summary)
 		except Exception as e:
 			logger.error('%s on_off burst failed: %s', slice_name, e)
-			results.append({'slice': slice_name, 'component': 'on_off', 'error': str(e)})
+			results.append(
+				{
+					'slice': slice_name,
+					'component': 'on_off',
+					'scenario': scenario,
+					'error': str(e),
+				}
+			)
 
 		elapsed += on_sec
 		if elapsed >= duration or stop_event.is_set():
 			break
 
-		off_sec = max(1, int(random.expovariate(1.0 / profile['mean_off_sec'])))
+		off_sec = max(min_off, int(rng.expovariate(1.0 / profile['mean_off_sec'])))
 		off_sec = min(off_sec, duration - elapsed)
 		stop_event.wait(timeout=off_sec)
 		elapsed += off_sec
@@ -184,14 +623,19 @@ def run_on_off_component(
 
 
 def run_mixed_slice(
-	slice_name: str, profile: dict, network: dict, duration: int
+	slice_name: str,
+	profile: dict,
+	network: dict,
+	duration: int,
+	scenario: str,
+	rng: random.Random,
 ) -> list[dict]:
 	results = []
 	stop_event = threading.Event()
 
 	def continuous():
 		try:
-			data = _run_iperf3(
+			data, start, end = _run_iperf3(
 				bind_ip=network['bind_ip'],
 				server_ip=network['server_ip'],
 				port=profile.get('continuous_port', 5201),
@@ -200,7 +644,7 @@ def run_mixed_slice(
 				target_bps=profile['continuous_bps'],
 			)
 			summary = _extract_summary(
-				slice_name, profile['protocol'], data, label='continuous'
+				slice_name, profile['protocol'], data, start, end, scenario, label='continuous'
 			)
 			logger.info(
 				'%s continuous: rx=%.2f Mbps', slice_name, summary.get('receiver_mbps', 0)
@@ -208,31 +652,70 @@ def run_mixed_slice(
 			results.append(summary)
 		except Exception as e:
 			logger.error('%s continuous failed: %s', slice_name, e)
-			results.append({'slice': slice_name, 'component': 'continuous', 'error': str(e)})
+			results.append(
+				{
+					'slice': slice_name,
+					'component': 'continuous',
+					'scenario': scenario,
+					'error': str(e),
+				}
+			)
 		finally:
 			stop_event.set()
 
 	t = threading.Thread(target=continuous, daemon=True)
 	t.start()
-
 	on_off_results = run_on_off_component(
-		slice_name, profile, network, duration, stop_event
+		slice_name, profile, network, duration, stop_event, scenario, rng,
 	)
 	results.extend(on_off_results)
-
 	t.join()
 	return results
 
 
-def run_slice(slice_name: str, profile: dict, duration: int) -> list[dict]:
-	network = SLICE_NETWORK[slice_name]
+def run_slice(
+	slice_name: str,
+	profile: dict,
+	network: dict,
+	duration: int,
+	sta_pid: int,
+	scenario: str,
+	rng: random.Random,
+) -> list[dict]:
 	pattern = profile.get('pattern', 'continuous')
-	logger.info('Starting %s (%s pattern)', slice_name, pattern)
+	logger.info(
+		'Starting %s (%s pattern, bidirectional, scenario=%s)',
+		slice_name,
+		pattern,
+		scenario,
+	)
 
-	if pattern == 'mixed':
-		return run_mixed_slice(slice_name, profile, network, duration)
-	else:
-		return run_continuous_slice(slice_name, profile, network, duration)
+	ul_results: list[dict] = []
+	dl_results: list[dict] = []
+
+	def run_ul():
+		if pattern == 'mixed':
+			ul_results.extend(
+				run_mixed_slice(slice_name, profile, network, duration, scenario, rng)
+			)
+		else:
+			ul_results.extend(
+				run_continuous_slice(slice_name, profile, network, duration, scenario)
+			)
+
+	def run_dl():
+		dl_results.extend(
+			run_downlink_slice(slice_name, profile, network, duration, sta_pid, scenario)
+		)
+
+	ul_thread = threading.Thread(target=run_ul, daemon=True)
+	dl_thread = threading.Thread(target=run_dl, daemon=True)
+	ul_thread.start()
+	dl_thread.start()
+	ul_thread.join()
+	dl_thread.join()
+
+	return ul_results + dl_results
 
 
 def save_results(results: list[dict], output_dir: Path) -> None:
@@ -244,27 +727,42 @@ def save_results(results: list[dict], output_dir: Path) -> None:
 
 
 def main():
-	parser = argparse.ArgumentParser(description='Per-slice iperf3 traffic generator')
+	profiles, defaults, scenarios = load_traffic_config()
+	resolved_name = TRAFFIC_CONFIG_PATH.resolve().name
+	logger.info('Using traffic profile: %s', resolved_name)
+	parser = argparse.ArgumentParser(
+		description='Per-slice bidirectional iperf3 traffic generator'
+	)
+	parser.add_argument('--slices', nargs='+', default=None)
+	parser.add_argument('--loops', type=int, default=0)
 	parser.add_argument(
-		'--slices',
-		nargs='+',
-		default=list(SLICE_NETWORK.keys()),
-		help='Slices to run (default: all)',
+		'--scenario',
+		choices=list(scenarios.keys()),
+		default=None,
+		help='Fix scenario for all loops. Omit to sample randomly each loop.',
 	)
 	parser.add_argument(
-		'--loops', type=int, default=0, help='Number of loops (0 = run forever)'
+		'--seed',
+		type=int,
+		default=None,
+		help='Seed for scenario/factor/burst-timing RNG. Omit for a nondeterministic run.',
 	)
 	args = parser.parse_args()
-
-	profiles, defaults = load_config()
+	slice_network = load_slice_network()
 	default_duration = defaults.get('duration_sec', 60)
 	inter_loop_gap = defaults.get('inter_loop_gap_sec', 5)
 	LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-	active_slices = [s for s in args.slices if s in profiles]
+	requested = args.slices or list(slice_network.keys())
+	active_slices = [s for s in requested if s in profiles and s in slice_network]
 	if not active_slices:
 		logger.error('No valid slices specified')
 		return
+
+	slice_pids = load_slice_pids()
+	slice_to_imsi, slice_to_config_file = load_ue_identity()
+	verify_tunnels(slice_network, slice_to_imsi, slice_to_config_file)
+	start_downlink_servers(slice_network)
 
 	running = True
 
@@ -276,26 +774,55 @@ def main():
 	signal.signal(signal.SIGINT, handle_signal)
 	signal.signal(signal.SIGTERM, handle_signal)
 
+	master_rng = random.Random(args.seed)
+
 	loop = 0
 	while running:
 		loop += 1
 		if args.loops > 0 and loop > args.loops:
 			break
 
-		logger.info('--- Loop %d ---', loop)
-		results = []
-		slice_results: dict[str, list] = {}
+		scenario_name = args.scenario or master_rng.choice(list(scenarios.keys()))
+		effective_profiles = sample_scenario(
+			scenario_name, scenarios[scenario_name], profiles, master_rng
+		)
+		logger.info('--- Loop %d | scenario=%s ---', loop, scenario_name)
 
-		def run_and_collect(name, prof, dur):
-			slice_results[name] = run_slice(name, prof, dur)
+		slice_results: dict[str, list] = {}
+		failed_slices: list[str] = []
+
+		def run_and_collect(name, prof, net, dur, pid, scen, rng):
+			result = run_slice(name, prof, net, dur, pid, scen, rng)
+			if all('error' in r for r in result):
+				failed_slices.append(name)
+			slice_results[name] = result
 
 		threads = []
 		for name in active_slices:
 			if not running:
 				break
+			if name not in slice_pids:
+				logger.error('No PID for slice %s — skipping', name)
+				failed_slices.append(name)
+				continue
 			dur = profiles[name].get('duration_sec', default_duration)
+			slice_rng = (
+				random.Random(f'{args.seed}:{loop}:{name}')
+				if args.seed is not None
+				else random.Random()
+			)
 			t = threading.Thread(
-				target=run_and_collect, args=(name, profiles[name], dur), daemon=True
+				target=run_and_collect,
+				args=(
+					name,
+					effective_profiles[name],
+					slice_network[name],
+					dur,
+					slice_pids[name],
+					scenario_name,
+					slice_rng,
+				),
+				daemon=True,
 			)
 			threads.append(t)
 			t.start()
@@ -303,13 +830,17 @@ def main():
 		for t in threads:
 			t.join()
 
+		results = []
 		for name in active_slices:
 			results.extend(slice_results.get(name, []))
+
+		if failed_slices:
+			logger.warning('Slices with complete failure: %s', failed_slices)
 
 		if results:
 			save_results(results, LOG_DIR)
 
-		if running and inter_loop_gap > 0:
+		if running and (args.loops == 0 or loop < args.loops) and inter_loop_gap > 0:
 			logger.info('Waiting %ds before next loop...', inter_loop_gap)
 			time.sleep(inter_loop_gap)
 
