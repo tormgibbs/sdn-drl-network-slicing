@@ -14,6 +14,11 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppSlicesRouteImport } from './routes/_app/slices'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppAgentRouteImport } from './routes/_app/agent'
+import { Route as AppSlicesVleRouteImport } from './routes/_app/slices/vle'
+import { Route as AppSlicesStudentPortalRouteImport } from './routes/_app/slices/student-portal'
+import { Route as AppSlicesIotRouteImport } from './routes/_app/slices/iot'
+import { Route as AppSlicesGeneralRouteImport } from './routes/_app/slices/general'
+import { Route as AppSlicesAdminRouteImport } from './routes/_app/slices/admin'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -39,32 +44,90 @@ const AppAgentRoute = AppAgentRouteImport.update({
   path: '/agent',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSlicesVleRoute = AppSlicesVleRouteImport.update({
+  id: '/vle',
+  path: '/vle',
+  getParentRoute: () => AppSlicesRoute,
+} as any)
+const AppSlicesStudentPortalRoute = AppSlicesStudentPortalRouteImport.update({
+  id: '/student-portal',
+  path: '/student-portal',
+  getParentRoute: () => AppSlicesRoute,
+} as any)
+const AppSlicesIotRoute = AppSlicesIotRouteImport.update({
+  id: '/iot',
+  path: '/iot',
+  getParentRoute: () => AppSlicesRoute,
+} as any)
+const AppSlicesGeneralRoute = AppSlicesGeneralRouteImport.update({
+  id: '/general',
+  path: '/general',
+  getParentRoute: () => AppSlicesRoute,
+} as any)
+const AppSlicesAdminRoute = AppSlicesAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppSlicesRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/agent': typeof AppAgentRoute
   '/settings': typeof AppSettingsRoute
-  '/slices': typeof AppSlicesRoute
+  '/slices': typeof AppSlicesRouteWithChildren
+  '/slices/admin': typeof AppSlicesAdminRoute
+  '/slices/general': typeof AppSlicesGeneralRoute
+  '/slices/iot': typeof AppSlicesIotRoute
+  '/slices/student-portal': typeof AppSlicesStudentPortalRoute
+  '/slices/vle': typeof AppSlicesVleRoute
 }
 export interface FileRoutesByTo {
   '/agent': typeof AppAgentRoute
   '/settings': typeof AppSettingsRoute
-  '/slices': typeof AppSlicesRoute
+  '/slices': typeof AppSlicesRouteWithChildren
   '/': typeof AppIndexRoute
+  '/slices/admin': typeof AppSlicesAdminRoute
+  '/slices/general': typeof AppSlicesGeneralRoute
+  '/slices/iot': typeof AppSlicesIotRoute
+  '/slices/student-portal': typeof AppSlicesStudentPortalRoute
+  '/slices/vle': typeof AppSlicesVleRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/_app/agent': typeof AppAgentRoute
   '/_app/settings': typeof AppSettingsRoute
-  '/_app/slices': typeof AppSlicesRoute
+  '/_app/slices': typeof AppSlicesRouteWithChildren
   '/_app/': typeof AppIndexRoute
+  '/_app/slices/admin': typeof AppSlicesAdminRoute
+  '/_app/slices/general': typeof AppSlicesGeneralRoute
+  '/_app/slices/iot': typeof AppSlicesIotRoute
+  '/_app/slices/student-portal': typeof AppSlicesStudentPortalRoute
+  '/_app/slices/vle': typeof AppSlicesVleRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/agent' | '/settings' | '/slices'
+  fullPaths:
+    | '/'
+    | '/agent'
+    | '/settings'
+    | '/slices'
+    | '/slices/admin'
+    | '/slices/general'
+    | '/slices/iot'
+    | '/slices/student-portal'
+    | '/slices/vle'
   fileRoutesByTo: FileRoutesByTo
-  to: '/agent' | '/settings' | '/slices' | '/'
+  to:
+    | '/agent'
+    | '/settings'
+    | '/slices'
+    | '/'
+    | '/slices/admin'
+    | '/slices/general'
+    | '/slices/iot'
+    | '/slices/student-portal'
+    | '/slices/vle'
   id:
     | '__root__'
     | '/_app'
@@ -72,6 +135,11 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/slices'
     | '/_app/'
+    | '/_app/slices/admin'
+    | '/_app/slices/general'
+    | '/_app/slices/iot'
+    | '/_app/slices/student-portal'
+    | '/_app/slices/vle'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -115,20 +183,75 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAgentRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/slices/vle': {
+      id: '/_app/slices/vle'
+      path: '/vle'
+      fullPath: '/slices/vle'
+      preLoaderRoute: typeof AppSlicesVleRouteImport
+      parentRoute: typeof AppSlicesRoute
+    }
+    '/_app/slices/student-portal': {
+      id: '/_app/slices/student-portal'
+      path: '/student-portal'
+      fullPath: '/slices/student-portal'
+      preLoaderRoute: typeof AppSlicesStudentPortalRouteImport
+      parentRoute: typeof AppSlicesRoute
+    }
+    '/_app/slices/iot': {
+      id: '/_app/slices/iot'
+      path: '/iot'
+      fullPath: '/slices/iot'
+      preLoaderRoute: typeof AppSlicesIotRouteImport
+      parentRoute: typeof AppSlicesRoute
+    }
+    '/_app/slices/general': {
+      id: '/_app/slices/general'
+      path: '/general'
+      fullPath: '/slices/general'
+      preLoaderRoute: typeof AppSlicesGeneralRouteImport
+      parentRoute: typeof AppSlicesRoute
+    }
+    '/_app/slices/admin': {
+      id: '/_app/slices/admin'
+      path: '/admin'
+      fullPath: '/slices/admin'
+      preLoaderRoute: typeof AppSlicesAdminRouteImport
+      parentRoute: typeof AppSlicesRoute
+    }
   }
 }
+
+interface AppSlicesRouteChildren {
+  AppSlicesAdminRoute: typeof AppSlicesAdminRoute
+  AppSlicesGeneralRoute: typeof AppSlicesGeneralRoute
+  AppSlicesIotRoute: typeof AppSlicesIotRoute
+  AppSlicesStudentPortalRoute: typeof AppSlicesStudentPortalRoute
+  AppSlicesVleRoute: typeof AppSlicesVleRoute
+}
+
+const AppSlicesRouteChildren: AppSlicesRouteChildren = {
+  AppSlicesAdminRoute: AppSlicesAdminRoute,
+  AppSlicesGeneralRoute: AppSlicesGeneralRoute,
+  AppSlicesIotRoute: AppSlicesIotRoute,
+  AppSlicesStudentPortalRoute: AppSlicesStudentPortalRoute,
+  AppSlicesVleRoute: AppSlicesVleRoute,
+}
+
+const AppSlicesRouteWithChildren = AppSlicesRoute._addFileChildren(
+  AppSlicesRouteChildren,
+)
 
 interface AppRouteChildren {
   AppAgentRoute: typeof AppAgentRoute
   AppSettingsRoute: typeof AppSettingsRoute
-  AppSlicesRoute: typeof AppSlicesRoute
+  AppSlicesRoute: typeof AppSlicesRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAgentRoute: AppAgentRoute,
   AppSettingsRoute: AppSettingsRoute,
-  AppSlicesRoute: AppSlicesRoute,
+  AppSlicesRoute: AppSlicesRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
 }
 
