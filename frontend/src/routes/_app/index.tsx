@@ -1,7 +1,8 @@
 // routes/_app/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { computeSLA, getDynamicState, initialData } from "#/data/dashboard";
+import { getDynamicState, initialData } from "#/data/dashboard";
+import { computeSlaStatus } from "#/lib/sla";
 import { SliceTable } from "#/components/primitives/slice-table.tsx";
 import { PerformanceCharts } from "#/components/primitives/performance-charts";
 import { SidePanel } from "#/components/primitives/side-panel";
@@ -41,7 +42,7 @@ function Home() {
 
   const nominalCount = sliceKeys.filter(
     (key) =>
-      computeSLA(initialData.slices[key], dynamicData.metrics[key]) ===
+      computeSlaStatus(dynamicData.metrics[key], initialData.slices[key]) ===
       "NOMINAL",
   ).length;
   const slaSatisfaction = ((nominalCount / sliceKeys.length) * 100).toFixed(1);

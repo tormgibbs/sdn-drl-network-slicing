@@ -1,5 +1,10 @@
-import type { Metric, SliceConfig } from "#/types/slice";
-import type { WSMessage, Mode, Scenario } from "#/types/slice";
+import type { Metric, SliceKey, Mode, Scenario } from "#/types/slice";
+
+export type MockDashboardSnapshot = {
+  metrics: Record<SliceKey, Metric>;
+  allocations: Record<SliceKey, number>;
+  timestamp: string;
+};
 
 export const initialData = {
   slices: {
@@ -47,7 +52,7 @@ export const initialData = {
 };
 
 // Simulates what the WebSocket pushes every 5 seconds
-export const dynamicStates: Record<string, WSMessage> = {
+export const dynamicStates: Record<string, MockDashboardSnapshot> = {
   agent_normal: {
     timestamp: "",
     allocations: {
@@ -68,7 +73,6 @@ export const dynamicStates: Record<string, WSMessage> = {
       iot: { tx_throughput_bps: 65000, latency_ms: 0.9, loss_pct: 0.03 },
       general: { tx_throughput_bps: 5500000, latency_ms: 0.7, loss_pct: 0.0 },
     },
-    // all above min_throughput → all NOMINAL
   },
 
   agent_registration_spike: {
@@ -95,9 +99,6 @@ export const dynamicStates: Record<string, WSMessage> = {
         loss_pct: 0.0,
       },
     },
-    // iot latency 113.7 > max 200? no. but loss 0.06 > max 5.0? no.
-    // iot throughput 13000000 > min 64000? yes. → actually NOMINAL
-    // tweak numbers to get violations you want to demo
   },
 
   agent_quiz_spike: {
@@ -154,15 +155,15 @@ export const dynamicStates: Record<string, WSMessage> = {
       general: 130000000,
     },
     metrics: {
-      vle: { tx_throughput_bps: 40000000, latency_ms: 95.0, loss_pct: 0.45 }, // WARNING (near threshold)
+      vle: { tx_throughput_bps: 40000000, latency_ms: 95.0, loss_pct: 0.45 },
       student_portal: {
         tx_throughput_bps: 20000000,
         latency_ms: 55.0,
         loss_pct: 0.12,
-      }, // VIOLATION (loss > 0.1, thrpt < 25000000)
-      admin: { tx_throughput_bps: 80000000, latency_ms: 14.0, loss_pct: 0.0 }, // NOMINAL
-      iot: { tx_throughput_bps: 65000, latency_ms: 185.0, loss_pct: 0.08 }, // WARNING (latency near 200)
-      general: { tx_throughput_bps: 5500000, latency_ms: 62.0, loss_pct: 0.0 }, // NOMINAL
+      },
+      admin: { tx_throughput_bps: 80000000, latency_ms: 14.0, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 65000, latency_ms: 185.0, loss_pct: 0.08 },
+      general: { tx_throughput_bps: 5500000, latency_ms: 62.0, loss_pct: 0.0 },
     },
   },
 
@@ -176,15 +177,15 @@ export const dynamicStates: Record<string, WSMessage> = {
       general: 130000000,
     },
     metrics: {
-      vle: { tx_throughput_bps: 45000000, latency_ms: 82.0, loss_pct: 0.38 }, // WARNING
+      vle: { tx_throughput_bps: 45000000, latency_ms: 82.0, loss_pct: 0.38 },
       student_portal: {
         tx_throughput_bps: 26000000,
         latency_ms: 6.0,
         loss_pct: 0.0,
-      }, // NOMINAL
-      admin: { tx_throughput_bps: 11000000, latency_ms: 5.0, loss_pct: 0.0 }, // NOMINAL
-      iot: { tx_throughput_bps: 65000, latency_ms: 1.2, loss_pct: 0.03 }, // NOMINAL
-      general: { tx_throughput_bps: 5500000, latency_ms: 4.0, loss_pct: 0.0 }, // NOMINAL
+      },
+      admin: { tx_throughput_bps: 11000000, latency_ms: 5.0, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 65000, latency_ms: 1.2, loss_pct: 0.03 },
+      general: { tx_throughput_bps: 5500000, latency_ms: 4.0, loss_pct: 0.0 },
     },
   },
 
@@ -220,15 +221,15 @@ export const dynamicStates: Record<string, WSMessage> = {
       general: 70000000,
     },
     metrics: {
-      vle: { tx_throughput_bps: 320000000, latency_ms: 28.0, loss_pct: 0.0 }, // NOMINAL
+      vle: { tx_throughput_bps: 320000000, latency_ms: 28.0, loss_pct: 0.0 },
       student_portal: {
         tx_throughput_bps: 140000000,
         latency_ms: 44.0,
         loss_pct: 0.09,
-      }, // WARNING (latency near 50, loss near 0.1)
-      admin: { tx_throughput_bps: 90000000, latency_ms: 11.0, loss_pct: 0.0 }, // NOMINAL
-      iot: { tx_throughput_bps: 65000, latency_ms: 168.0, loss_pct: 0.06 }, // WARNING (latency near 200)
-      general: { tx_throughput_bps: 5500000, latency_ms: 49.0, loss_pct: 0.0 }, // NOMINAL
+      },
+      admin: { tx_throughput_bps: 90000000, latency_ms: 11.0, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 65000, latency_ms: 168.0, loss_pct: 0.06 },
+      general: { tx_throughput_bps: 5500000, latency_ms: 49.0, loss_pct: 0.0 },
     },
   },
 
@@ -242,46 +243,28 @@ export const dynamicStates: Record<string, WSMessage> = {
       general: 60000000,
     },
     metrics: {
-      vle: { tx_throughput_bps: 340000000, latency_ms: 22.0, loss_pct: 0.0 }, // NOMINAL
+      vle: { tx_throughput_bps: 340000000, latency_ms: 22.0, loss_pct: 0.0 },
       student_portal: {
         tx_throughput_bps: 55000000,
         latency_ms: 7.0,
         loss_pct: 0.0,
-      }, // NOMINAL
-      admin: { tx_throughput_bps: 60000000, latency_ms: 6.0, loss_pct: 0.0 }, // NOMINAL
-      iot: { tx_throughput_bps: 65000, latency_ms: 162.0, loss_pct: 0.03 }, // WARNING (latency within 20% of 200)
-      general: { tx_throughput_bps: 5500000, latency_ms: 15.0, loss_pct: 0.0 }, // NOMINAL
+      },
+      admin: { tx_throughput_bps: 60000000, latency_ms: 6.0, loss_pct: 0.0 },
+      iot: { tx_throughput_bps: 65000, latency_ms: 162.0, loss_pct: 0.03 },
+      general: { tx_throughput_bps: 5500000, latency_ms: 15.0, loss_pct: 0.0 },
     },
   },
 };
 
-export function getDynamicState(mode: Mode, scenario: Scenario): WSMessage {
+export function getDynamicState(mode: Mode, scenario: Scenario): MockDashboardSnapshot {
   const key = `${mode}_${scenario}`;
   return dynamicStates[key];
 }
 
-export function computeSLA(slice: SliceConfig, metrics: Metric) {
-  const latency = metrics.latency_ms ?? 0;
-  const loss = metrics.loss_pct ?? 0;
-
-  if (
-    latency > slice.max_latency_ms ||
-    loss > slice.max_loss_pct ||
-    metrics.tx_throughput_bps < slice.min_throughput_bps
-  ) {
-    return "VIOLATION";
-  }
-  if (
-    latency > slice.max_latency_ms * 0.8 ||
-    loss > slice.max_loss_pct * 0.8 ||
-    metrics.tx_throughput_bps < slice.min_throughput_bps * 1.2
-  ) {
-    return "WARNING";
-  }
-  return "NOMINAL";
-}
-
-export function generateHistory(snapshot: WSMessage, points: number): WSMessage[] {
+export function generateHistory(
+  snapshot: MockDashboardSnapshot,
+  points: number,
+): MockDashboardSnapshot[] {
   return Array.from({ length: points }, (_, i) => ({
     ...snapshot,
     metrics: {
@@ -330,5 +313,3 @@ export function generateHistory(snapshot: WSMessage, points: number): WSMessage[
     timestamp: new Date(Date.now() - (points - i) * 5000).toISOString(),
   }));
 }
-
-

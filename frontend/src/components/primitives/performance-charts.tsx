@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Line, LineChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { generateHistory, initialData } from "#/data/dashboard";
-import type { WSMessage } from "#/types/slice";
+import type { MockDashboardSnapshot } from "#/data/dashboard";
 
 const TIME_RANGE_POINTS = { "1M": 12, "5M": 60, "15M": 180 };
 
@@ -28,7 +28,7 @@ const CustomTooltip = ({ active, payload }: any) => {
 };
 
 type PerformanceChartsProps = {
-  dynamicData: WSMessage;
+  dynamicData: MockDashboardSnapshot;
   totalAggregate: number;
   breachedSlice: keyof typeof initialData.slices | undefined;
 };

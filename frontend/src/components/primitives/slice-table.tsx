@@ -7,11 +7,12 @@ import {
   TableRow,
 } from "#/components/ui/table";
 import { Progress } from "#/components/ui/progress";
-import { computeSLA, initialData } from "#/data/dashboard";
-import type { WSMessage } from "#/types/slice";
+import { initialData } from "#/data/dashboard";
+import type { MockDashboardSnapshot } from "#/data/dashboard";
+import { computeSlaStatus } from "#/lib/sla";
 
 type SliceTableProps = {
-  dynamicData: WSMessage;
+  dynamicData: MockDashboardSnapshot;
   utilisedPct: string;
 };
 
@@ -34,7 +35,7 @@ export function SliceTable({ dynamicData, utilisedPct }: SliceTableProps) {
               initialData.slices[key as keyof typeof initialData.slices];
             const metric =
               dynamicData.metrics[key as keyof typeof dynamicData.metrics];
-            const sla = computeSLA(slice, metric);
+            const sla = computeSlaStatus(metric, slice);
             const slaColor = {
               VIOLATION: "red",
               WARNING: "yellow",
@@ -50,7 +51,9 @@ export function SliceTable({ dynamicData, utilisedPct }: SliceTableProps) {
 
             return (
               <TableRow key={key}>
-                <TableCell style={{color: priorityColor}}>{slice.priority_label}</TableCell>
+                <TableCell style={{ color: priorityColor }}>
+                  {slice.priority_label}
+                </TableCell>
                 <TableCell>{slice.name}</TableCell>
                 <TableCell style={{ color: slaColor }}>{sla}</TableCell>
                 <TableCell>

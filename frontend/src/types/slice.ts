@@ -1,24 +1,15 @@
 // types.ts
+import type { SliceConfig, Metric } from "#/lib/schemas";
 
 export type SliceKey = "vle" | "student_portal" | "admin" | "iot" | "general";
+export type SliceName = SliceKey; // alias — newer naming used elsewhere in the codebase
+
 export type Mode = "agent" | "static" | "heuristic";
 export type Scenario = "normal" | "registration_spike" | "quiz_spike";
 export type SLAStatus = "NOMINAL" | "WARNING" | "VIOLATION";
 
-export type SliceConfig = {
-  name: string;
-  priority: number;
-  priority_label: string;
-  max_latency_ms: number;
-  max_loss_pct: number;
-  min_throughput_bps: number;
-};
-
-export type Metric = {
-  tx_throughput_bps: number;
-  latency_ms: number | null;
-  loss_pct: number | null;
-};
+export type { SliceConfig, Metric } from "#/lib/schemas";
+export type SliceMetrics = Metric; // alias — newer naming used elsewhere
 
 // what GET /state returns
 export type StateResponse = {
@@ -30,7 +21,11 @@ export type StateResponse = {
   system: SystemInfo;
 };
 
-export type SliceSLA = {
+// config thresholds per slice — derived from SliceConfig so they can't drift apart
+export type SliceSLA = Pick<SliceConfig, "max_latency_ms" | "max_loss_pct" | "min_throughput_bps" | "priority">;
+
+// computed status for a slice at a point in time — was the old "SliceSLA"
+export type SliceSLAStatus = {
   priority: number;
   priority_label: string;
   sla_status: SLAStatus;
@@ -39,8 +34,6 @@ export type SliceSLA = {
 // what WebSocket pushes every 5 seconds
 export type WSMessage = {
   metrics: Record<SliceKey, Metric>;
-  allocations: Record<SliceKey, number>;
-  traffic?: Record<SliceKey, TrafficConfig>;
   timestamp: string;
 };
 
@@ -53,45 +46,10 @@ export type TrafficConfig = {
   mean_off_sec?: number;
   target_bps?: number;
 };
+export type SliceTrafficConfig = TrafficConfig; // alias — newer naming used elsewhere
 
 export type SystemInfo = {
   ues_attached: number;
   switches_connected: number;
   controller_healthy: boolean;
 };
-
-// export type SliceName =
-//   | 'vle'
-//   | 'student_portal'
-//   | 'admin'
-//   | 'iot'
-//   | 'general'
-
-// export interface SliceMetrics {
-//   tx_throughput_bps: number
-//   latency_ms: number | null
-//   loss_pct: number | null
-// }
-
-// export interface SliceAllocation {
-//   [slice: string]: number
-// }
-
-// export interface SliceSLA {
-//   max_latency_ms: number
-//   max_loss_pct: number
-//   min_throughput_bps: number
-//   priority: number
-// }
-
-// export interface SliceTrafficConfig {
-//   device_count: number
-//   pattern: 'continuous' | 'mixed'
-//   target_bps?: number
-//   continuous_bps?: number
-//   on_off_bps?: number
-//   mean_on_sec?: number
-//   mean_off_sec?: number
-// }
-
-// export type SlaStatus = 'met' | 'warning' | 'violated'

@@ -1,5 +1,5 @@
 import { Card, CardContent } from "#/components/ui/card";
-import { Line, LineChart, XAxis, YAxis, ReferenceLine, Tooltip, ResponsiveContainer } from "recharts";
+import { Line, LineChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import type { episodeHistory } from "#/data/agent-data.ts";
 
 const CustomTooltip = ({ active, payload }: any) => {

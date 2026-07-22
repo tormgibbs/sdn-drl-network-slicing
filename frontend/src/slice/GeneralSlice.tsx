@@ -37,7 +37,7 @@ export function GeneralSlice({
     "TCP File Xfer": (((last.tcp   ?? 0) / totalP) * 100).toFixed(1),
     "DNS / Other":   (((last.dns   ?? 0) / totalP) * 100).toFixed(1),
   };
-  const protoColors = [PROTO_COLORS.https, PROTO_COLORS.udp, PROTO_COLORS.tcp, PROTO_COLORS.dns];
+  // const protoColors = [PROTO_COLORS.https, PROTO_COLORS.udp, PROTO_COLORS.tcp, PROTO_COLORS.dns];
 
   const recentCycles = history.slice(0, 7).map((r) => ({
     id:     r.id,
