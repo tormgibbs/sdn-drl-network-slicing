@@ -1,4 +1,3 @@
-// routes/_app/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { getDynamicState, initialData } from "#/data/dashboard";
