@@ -3,11 +3,6 @@
 Filter real 'chaos' scenario episodes for a specific decorrelated stress
 combination, and check what the policy actually does in those genuine,
 in-distribution states.
-
-USAGE:
-    uv run python 04_decorrelated_stress_check.py --model-path models/ironwood/final \
-        --slice-a student_portal --slice-a-min-factor 1.1 \
-        --slice-b admin --slice-b-max-factor 0.7
 """
 
 import argparse
@@ -53,9 +48,16 @@ def main() -> None:
 		alloc_str = '  '.join(
 			f'{name}={fracs[i]:.3f}' for i, name in enumerate(slice_order)
 		)
-		print(
-			f'{args.slice_a}_factor={a_factor:.2f} {args.slice_b}_factor={b_factor:.2f} -> {alloc_str}'
-		)
+
+		# DIAGNOSTIC: Print the observation vector to see what the agent actually sees
+		latency = [f'{obs[i]:.2f}' for i in range(0, 15, 3)]
+		loss = [f'{obs[i]:.2f}' for i in range(1, 15, 3)]
+		util = [f'{obs[i]:.2f}' for i in range(2, 15, 3)]
+		print(f'{args.slice_a}_factor={a_factor:.2f} {args.slice_b}_factor={b_factor:.2f}')
+		print(f'  obs: lat={latency} | loss={loss} | util={util}')
+		print(f'  alloc: {alloc_str}')
+		print('-' * 60)
+
 		found += 1
 
 	print(
