@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 import yaml
+from os_ken.lib import hub
 
 from agent.project_allocation import project_allocation, validate_floors
 
@@ -37,6 +38,7 @@ class MeterManager:
 		self._datapaths: dict[str, object] = {}
 		self._installed_meter_ids: set[tuple[str, int]] = set()
 		self._meter_query_events: dict[str, threading.Event] = {}
+		self._meter_query_done: set[str] = set()
 		self._current_allocations: dict[str, float] = {}
 		self._initialized = False
 		slices = self._load_slices()
@@ -76,6 +78,7 @@ class MeterManager:
 	def handle_meter_config_reply(self, switch_name: str, body: list) -> None:
 		for meter in body:
 			self._installed_meter_ids.add((switch_name, meter.meter_id))
+		self._meter_query_done.add(switch_name)
 		event = self._meter_query_events.pop(switch_name, None)
 		if event is not None:
 			event.set()
@@ -84,23 +87,25 @@ class MeterManager:
 			switch_name,
 			[m.meter_id for m in body],
 		)
+		self._maybe_install_default_meters()
+
+	def _maybe_install_default_meters(self) -> None:
+		if not self._initialized and _AGGREGATION_SWITCHES.issubset(self._meter_query_done):
+			logger.info('All meter queries complete -- installing default meters')
+			self._install_default_meters()
+			self._initialized = True
 
 	def register_datapath(self, switch_name: str, datapath: object) -> None:
 		self._datapaths[switch_name] = datapath
 		logger.info('Datapath registered: %s', switch_name)
 
 		if switch_name in _AGGREGATION_SWITCHES:
-			self._query_existing_meters(switch_name, datapath)
+			hub.spawn(self._query_existing_meters, switch_name, datapath)
 
 		if not _AGGREGATION_SWITCHES.issubset(self._datapaths.keys()):
 			return
 
-		if not self._initialized:
-			logger.info('All aggregation switches registered -- installing default meters')
-			self._install_default_meters()
-			self._initialized = True
-
-		else:
+		if self._initialized:
 			logger.warning(
 				'Aggregation switch reconnected: %s -- re-applying current allocations',
 				switch_name,
@@ -109,7 +114,7 @@ class MeterManager:
 			self._installed_meter_ids = {
 				(sw, mid) for (sw, mid) in self._installed_meter_ids if sw != switch_name
 			}
-			self._query_existing_meters(switch_name, datapath)
+			self._meter_query_done.discard(switch_name)
 
 			slices = self._load_slices()
 			self._install_meters_for_switch(
