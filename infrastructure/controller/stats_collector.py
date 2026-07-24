@@ -322,26 +322,26 @@ class StatsCollector:
 				if meter_manager is not None:
 					meter_manager.check_barrier_watchdog()
 
+					confirmed_time = meter_manager.get_change_confirmed_time()
+					settle_sec = self._get_topology()['controller'].get('meter_settle_sec', 0.5)
+					if confirmed_time > 0 and cycle_start - confirmed_time < settle_sec:
+						logger.debug(
+							'Stats collector: within %.2fs post-allocation settle window -- '
+							'skipping full probe cycle, keeping last known values',
+							settle_sec,
+						)
+						elapsed = time.time() - cycle_start
+						remaining = self._interval_sec - elapsed
+						if remaining > 0:
+							hub.sleep(remaining)
+						continue
+
 				with self._cache_lock:
 					self._pending_throughput.clear()
 				self._reply_count = 0
 				self._reply_event = threading.Event()
 
 				self._request_stats()
-
-				fired = self._reply_event.wait(
-					timeout=min(_OFP_REPLY_WAIT_SEC, self._interval_sec * 0.2)
-				)
-				if not fired:
-					with self._cache_lock:
-						reply_count = self._reply_count
-					logger.warning(
-						'Stats collector: only %d/%d OFP replies received',
-						reply_count,
-						_EXPECTED_REPLIES,
-					)
-
-				self._run_probe_cycle()
 
 				elapsed = time.time() - cycle_start
 				remaining = self._interval_sec - elapsed
@@ -713,18 +713,6 @@ class StatsCollector:
 				identity['config_file'],
 				probe_interface,
 			)
-
-		meter_manager = rest_api.registry.meter_manager
-		if meter_manager is not None:
-			confirmed_time = meter_manager.get_change_confirmed_time()
-			settle_sec = self._get_topology()['controller'].get('meter_settle_sec', 0.5)
-			if confirmed_time > 0 and time.time() - confirmed_time < settle_sec:
-				logger.debug(
-					'Stats collector: within %.2fs post-allocation settle window -- '
-					'skipping cache update, keeping last known values',
-					settle_sec,
-				)
-				return
 
 		with self._cache_lock:
 			for slice_name, probe in merged.items():
