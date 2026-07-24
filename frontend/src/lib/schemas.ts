@@ -40,6 +40,31 @@ export const MetricSchema = z.object({
   loss_pct: z.number().nullable(),
 });
 
+export const AgentStateSchema = z.object({
+  timestamp: z.string(),
+  step: z.number().int(),
+  reward: z.number(),
+  allocation_kbps: z.record(z.string(), z.number()),
+  done: z.boolean(),
+});
+
+export type AgentState = z.infer<typeof AgentStateSchema>;
+
+// The actual full envelope /ws/metrics now sends
+export const WsMetricsEnvelopeSchema = z.object({
+  timestamp: z.string(),
+  metrics: MetricsResponseSchema,
+  agent: AgentStateSchema.nullable(),
+});
+
+export type WsMetricsEnvelope = z.infer<typeof WsMetricsEnvelopeSchema>;
+
+export const TrafficScenarioRequestSchema = z.object({
+  scenario: z.string(),
+});
+
+export type TrafficScenarioRequest = z.infer<typeof TrafficScenarioRequestSchema>;
+
 export type SliceConfig = z.infer<typeof SliceConfigSchema>;
 export type Metric = z.infer<typeof MetricSchema>;
 export type MetricsResponse = z.infer<typeof MetricsResponseSchema>;
