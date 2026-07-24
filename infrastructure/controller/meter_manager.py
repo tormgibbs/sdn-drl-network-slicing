@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 from pathlib import Path
 
 import yaml
@@ -40,6 +41,10 @@ class MeterManager:
 		self._meter_query_events: dict[str, threading.Event] = {}
 		self._meter_query_done: set[str] = set()
 		self._current_allocations: dict[str, float] = {}
+		self._pending_barriers: dict[int, str] = {}
+		self._change_confirmed_time: float = 0.0
+		self._pending_since: float = 0.0
+		self._last_pending_warning: float = 0.0
 		self._initialized = False
 		slices = self._load_slices()
 		self.slice_order: list[str] = slices['slice_order']
@@ -165,10 +170,76 @@ class MeterManager:
 
 		rates_kbps = self._compute_rates_kbps(allocations, slices)
 
+		# Superseded by this call. Any barrier replies still in flight for a
+		# prior allocation must not be mistaken for confirmation of this one.
+		self._pending_barriers.clear()
+
 		for switch_name in aggregation_ports:
 			self._install_meters_for_switch(switch_name, rates_kbps, topology, slices)
+			datapath = self._datapaths.get(switch_name)
+			if datapath is None:
+				continue
+			ofp_parser = datapath.ofproto_parser
+			barrier = ofp_parser.OFPBarrierRequest(datapath)
+			datapath.send_msg(barrier)
+			self._pending_barriers[barrier.xid] = switch_name
+
+		if not self._pending_barriers:
+			# No datapaths were available to barrier against. Treat as
+			# confirmed immediately rather than waiting on nothing.
+			self._change_confirmed_time = time.time()
 
 		return rates_kbps
+
+	def handle_barrier_reply(self, xid: int) -> None:
+		switch_name = self._pending_barriers.pop(xid, None)
+		if switch_name is None:
+			return  # unknown or already-superseded xid
+		if not self._pending_barriers:
+			self._change_confirmed_time = time.time()
+			logger.info(
+				'Allocation change confirmed via barrier at %.6f', self._change_confirmed_time
+			)
+
+	def handle_datapath_disconnect(self, switch_name: str) -> None:
+		# A disconnected switch can never send its barrier reply. Waiting
+		# for one that will never arrive would wedge the collector forever.
+		gone_xids = [x for x, sw in self._pending_barriers.items() if sw == switch_name]
+
+		for xid in gone_xids:
+			del self._pending_barriers[xid]
+
+		if gone_xids and not self._pending_barriers:
+			self._change_confirmed_time = time.time()
+			logger.warning(
+				'Barrier for %s abandoned -- switch disconnected before reply', switch_name
+			)
+
+	def check_barrier_watchdog(self) -> None:
+		"""Logs, but never confirms. A stuck barrier must be fixed by a
+		disconnect event or a fresh allocation, not by this check timing out."""
+		if not self._pending_barriers:
+			return
+
+		topology = self._load_topology()
+		controller_cfg = topology['controller']
+		timeout_sec = controller_cfg.get('barrier_timeout_sec', 5.0)
+		warn_interval_sec = controller_cfg.get('barrier_warn_interval_sec', 30.0)
+
+		now = time.time()
+		if now - self._pending_since < timeout_sec:
+			return
+		if now - self._last_pending_warning < warn_interval_sec:
+			return
+		self._last_pending_warning = now
+		logger.warning(
+			'Barrier still pending after %.1fs for switches: %s',
+			now - self._pending_since,
+			sorted(set(self._pending_barriers.values())),
+		)
+
+	def get_change_confirmed_time(self) -> float:
+		return self._change_confirmed_time
 
 	def _install_meters_for_switch(
 		self,

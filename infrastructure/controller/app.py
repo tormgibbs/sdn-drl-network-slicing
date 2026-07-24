@@ -11,7 +11,11 @@ import os
 import yaml
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
-from os_ken.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
+from os_ken.controller.handler import (
+	CONFIG_DISPATCHER,
+	MAIN_DISPATCHER,
+	set_ev_cls,
+)
 from os_ken.ofproto import ofproto_v1_3
 
 from infrastructure.controller.agent_manager import AgentManager
@@ -130,6 +134,17 @@ class CampusController(app_manager.OSKenApp):
 		name = self.dpid_to_name.get(dpid, '')
 		if name in ('s2', 's3'):
 			self.meter_manager.handle_meter_config_reply(name, ev.msg.body)
+
+	@set_ev_cls(ofp_event.EventOFPBarrierReply, MAIN_DISPATCHER)
+	def barrier_reply_handler(self, ev):
+		self.meter_manager.handle_barrier_reply(ev.msg.xid)
+
+	@set_ev_cls(ofp_event.EventOFPStateChange, DEAD_DISPATCHER)
+	def datapath_dead_handler(self, ev):
+		datapath = ev.datapath
+		name = self.dpid_to_name.get(datapath.id, '')
+		if name in ('s2', 's3'):
+			self.meter_manager.handle_datapath_disconnect(name)
 
 	@set_ev_cls(
 		ofp_event.EventOFPPortDescStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
