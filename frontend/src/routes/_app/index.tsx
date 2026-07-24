@@ -11,11 +11,8 @@ import type { Mode, Scenario } from "#/types/slice";
 
 export const Route = createFileRoute("/_app/")({ component: Home });
 
-// TODO: confirm correct model with teammate — ivy/juniper/kingwood/laurel are
-// the candidates seen in models/selected/. .zip is appended automatically by
-// the backend if omitted, so either "models/selected/ivy" or the full
-// "models/selected/ivy.zip" works.
-const DEMO_MODEL_PATH = "models/selected/ivy";
+// Confirmed with teammate: laurel is the model for the demo.
+const DEMO_MODEL_PATH = "models/selected/laurel";
 
 function formatSync(lastUpdated: number | null, nowTick: number): string | null {
   if (lastUpdated === null) return null;
