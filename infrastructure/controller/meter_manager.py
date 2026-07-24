@@ -257,9 +257,7 @@ class MeterManager:
 			)
 		)
 
-		logger.warning(
-			'[BARRIER TEST] MeterMod sent switch=%s at %.6f', switch_name, time.time()
-		)
+		print(f'[BARRIER TEST] MeterMod sent switch={switch_name} at {time.time():.6f}')
 		datapath.send_msg(ofp_parser.OFPBarrierRequest(datapath))
 		self._installed_meter_ids.add(key)
 
