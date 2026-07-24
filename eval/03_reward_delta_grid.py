@@ -24,30 +24,41 @@ import yaml
 from stable_baselines3 import PPO
 
 from agent.project_allocation import project_allocation
-from agent.sim_env import _CONGESTION_THRESHOLD, W1, W2, W3, W4, W5, W6, SimCampusEnv
+from agent.sim_env import W1, W2, W3, W4, W5, W6, SimCampusEnv
 
 
-def full_reward(rates_kbps, metrics, slice_order, slices_cfg):
+def full_reward(rates_kbps, prev_rates_kbps, metrics, slice_order, slices_cfg, C_kbps):
 	n = len(slice_order)
-	r_sla = p_lat = p_loss = p_cong = r_util = 0.0
+	r_sla = p_lat = p_loss = p_osc = r_util = 0.0
 	fr = []
 	for name in slice_order:
 		m = metrics[name]
 		s = slices_cfg[name]
 		si, Li, Li_loss = s['priority'], s['max_latency_ms'], s['max_loss_pct']
-		p_lat += si * max(0.0, (m['latency_ms'] - Li) / Li)
-		sla_met = m['latency_ms'] <= Li and m['loss_pct'] <= Li_loss
-		r_sla += si * (1.0 if sla_met else 0.0)
-		p_loss += si * (m['loss_pct'] / 100.0)
+
+		latency_ratio = m['latency_ms'] / Li
+		p_lat += si * (latency_ratio**2)
+
+		loss_ratio = m['loss_pct'] / Li_loss
+		p_loss += si * loss_ratio
+
+		latency_sat = max(0.0, 1.0 - latency_ratio)
+		loss_sat = max(0.0, 1.0 - loss_ratio)
+		r_sla += si * (latency_sat * loss_sat)
+
 		ceil = rates_kbps[name] * 1000
 		util = min(m['tx_throughput_bps'] / ceil, 1.0) if ceil > 0 else 0.0
 		r_util += util
-		p_cong += si * max(0.0, util - _CONGESTION_THRESHOLD)
 		fr.append(rates_kbps[name] / si)
+
+		prev_rate = prev_rates_kbps[name]
+		change = abs(rates_kbps[name] - prev_rate) / C_kbps
+		p_osc += change
+
 	r_util /= n
 	sr, ssq = sum(fr), sum(x**2 for x in fr)
 	pf = 1.0 - (sr**2) / (n * ssq) if ssq > 0 else 0.0
-	return W1 * r_sla - W2 * p_lat - W3 * p_loss - W4 * p_cong + W5 * r_util - W6 * pf
+	return W1 * r_sla - W2 * p_lat - W3 * p_loss - W4 * p_osc + W5 * r_util - W6 * pf
 
 
 def make_counter(fracs, from_idx, to_idx, delta=0.10):
