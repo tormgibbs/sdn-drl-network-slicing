@@ -17,16 +17,39 @@ export const Route = createFileRoute("/_app/")({ component: Home });
 // "models/selected/ivy.zip" works.
 const DEMO_MODEL_PATH = "models/selected/ivy";
 
+function formatSync(lastUpdated: number | null, nowTick: number): string | null {
+  if (lastUpdated === null) return null;
+  const elapsedMs = nowTick - lastUpdated;
+  if (elapsedMs < 1000) return "SYNC: just now";
+  const elapsedSec = Math.floor(elapsedMs / 1000);
+  if (elapsedSec < 60) return `SYNC: ${elapsedSec}s ago`;
+  const elapsedMin = Math.floor(elapsedSec / 60);
+  return `SYNC: ${elapsedMin}m ago`;
+}
+
 function Home() {
   const [scenarioMode, setScenarioMode] = useState<Scenario>("normal");
   const [isSwitchingScenario, setIsSwitchingScenario] = useState(false);
   const [isAgentBusy, setIsAgentBusy] = useState(false);
 
+  // Drives the "SYNC: Xs ago" label — ticks once a second purely to force a
+  // re-render so elapsed time stays current; it holds no state of its own,
+  // the real source of truth is still lastUpdated from the store.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
   const scenarioPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const liveMetrics = useLiveMetricsStore((s) => s.metrics);
   const agent = useLiveMetricsStore((s) => s.agent);
+  const lastUpdated = useLiveMetricsStore((s) => s.lastUpdated);
   const agentRunning = agent !== null;
+
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const syncLabel = formatSync(lastUpdated, nowTick);
 
   // Mode fed into getDynamicState is a cosmetic pre-live-data mock-fallback
   // placeholder only — "heuristic" is never produced here, since it was never
@@ -71,7 +94,6 @@ function Home() {
 
   const reward = agent?.reward ?? null;
 
-  // Clean up any in-flight poll on unmount
   useEffect(() => {
     return () => {
       if (scenarioPollRef.current) clearInterval(scenarioPollRef.current);
@@ -90,10 +112,6 @@ function Home() {
       return;
     }
 
-    // Confirmation lag is real: the backend only picks up the new scenario at
-    // the next traffic loop boundary, not immediately. Worst case is one full
-    // loop duration + inter_loop_gap_sec (~65s default) — this is expected
-    // backend behavior (confirmed from traffic/runner.py), not a bug.
     if (scenarioPollRef.current) clearInterval(scenarioPollRef.current);
     scenarioPollRef.current = setInterval(async () => {
       try {
@@ -111,16 +129,10 @@ function Home() {
   const handleAgentStart = async () => {
     setIsAgentBusy(true);
     try {
-      // "start" synchronously loads a PPO model from disk on the backend
-      // before responding — expect a real, if usually short, delay here.
       await postAgentControl({ action: "start", model_path: DEMO_MODEL_PATH });
     } catch (err) {
       console.error("agent start request failed", err);
     } finally {
-      // Confirmation that the agent is actually running comes from the WS
-      // `agent` field turning non-null, not from this response — the WS
-      // envelope only updates on its own broadcast cadence, so there's a
-      // small (seconds-scale) additional lag beyond this request resolving.
       setIsAgentBusy(false);
     }
   };
@@ -142,7 +154,7 @@ function Home() {
       <div className="bg-muted p-4 flex-1">
         <div className="flex justify-between items-center mb-4">
           <p className="font-semibold text-3xl">Network Slice Status</p>
-          <p>SYNC: 1.2ms ago</p>
+          {syncLabel && <p>{syncLabel}</p>}
         </div>
 
         <SliceTable dynamicData={dynamicData} utilisedPct={utilisedPct} />
