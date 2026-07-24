@@ -63,10 +63,13 @@ def full_reward(rates_kbps, prev_rates_kbps, metrics, slice_order, slices_cfg, C
 
 def make_counter(fracs, from_idx, to_idx, delta=0.10):
 	c = fracs.copy()
-	c[from_idx] = max(0.05, c[from_idx] - delta)
-	c[to_idx] = min(0.60, c[to_idx] + delta)
+	requested_from = c[from_idx] - delta
+	requested_to = c[to_idx] + delta
+	c[from_idx] = max(0.05, requested_from)
+	c[to_idx] = min(0.60, requested_to)
+	clipped = (c[from_idx] != requested_from) or (c[to_idx] != requested_to)
 	s = sum(c)
-	return [x / s for x in c]
+	return [x / s for x in c], clipped
 
 
 def parse_counters(pairs, slice_order):
@@ -122,7 +125,7 @@ def run_analysis(
 		found += 1
 
 		for name, (fi, ti) in counters.items():
-			cf = make_counter(fracs, fi, ti)
+			cf, _ = make_counter(fracs, fi, ti)
 			rates_c = dict(zip(slice_order, project_allocation(cf, floors_kbps, C_kbps)))
 
 			r_c = full_reward(
@@ -136,11 +139,12 @@ def run_analysis(
 	fi, ti = (
 		counters.get(sweep_key) or parse_counters([sweep_counter], slice_order)[sweep_key]
 	)
+	sweep_seeds = list(range(sweep_episodes))
 	sweep_results = []
 	for delta in sweep_sizes:
-		wins, deltas = 0, []
-		for _ in range(sweep_episodes):
-			obs, _ = env.reset()
+		wins, deltas, clips = 0, [], 0
+		for seed in sweep_seeds:
+			obs, _ = env.reset(seed=seed)
 			metrics = env._last_metrics
 			action, _ = model.predict(obs, deterministic=True)
 			exp = np.exp(action)
@@ -152,9 +156,10 @@ def run_analysis(
 			r_policy = full_reward(
 				rates_policy, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
 			)
-			cf = make_counter(fracs, fi, ti, delta=delta)
+			cf, clipped = make_counter(fracs, fi, ti, delta=delta)
+			if clipped:
+				clips += 1
 			rates_c = dict(zip(slice_order, project_allocation(cf, floors_kbps, C_kbps)))
-			# FIX: Added prev_rates and C_kbps
 			r_c = full_reward(
 				rates_c, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
 			)
@@ -162,7 +167,9 @@ def run_analysis(
 			if r_c > r_policy:
 				wins += 1
 		d = np.array(deltas)
-		sweep_results.append((delta, wins / len(deltas), d.mean()))
+		sweep_results.append(
+			(delta, wins / len(deltas), d.mean(), clips / len(sweep_seeds))
+		)
 
 	return {
 		'found': found,
@@ -251,10 +258,10 @@ def main() -> None:
 			)
 
 		print(f'\n=== {res["sweep_counter"]} step-size sweep ===')
-		print(f'{"delta":<10} {"win_rate":<12} {"mean_delta"}')
-		print('-' * 35)
-		for delta, win_rate, mean_delta in res['sweep_results']:
-			print(f'{delta:<10} {win_rate:<12.1%} {mean_delta:.5f}')
+		print(f'{"delta":<10} {"win_rate":<12} {"mean_delta":<14} {"clip_rate"}')
+		print('-' * 45)
+		for delta, win_rate, mean_delta, clip_rate in res['sweep_results']:
+			print(f'{delta:<10} {win_rate:<12.1%} {mean_delta:<14.5f} {clip_rate:.1%}')
 
 	if len(all_results) > 1:
 		print(
