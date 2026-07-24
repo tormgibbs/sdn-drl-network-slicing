@@ -14,6 +14,7 @@ from os_ken.controller import ofp_event
 from os_ken.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
 from os_ken.ofproto import ofproto_v1_3
 
+from infrastructure.controller.agent_manager import AgentManager
 from infrastructure.controller.flow_manager import (
 	get_ap_name,
 	get_ap_vlan,
@@ -32,6 +33,7 @@ from infrastructure.controller.flow_manager import (
 from infrastructure.controller.meter_manager import MeterManager
 from infrastructure.controller.rest_api import registry, start_api_server
 from infrastructure.controller.stats_collector import StatsCollector
+from infrastructure.controller.traffic_manager import TrafficManager
 
 DPID_MAP_PATH = 'config/dpid_map.json'
 SLICES_CONFIG_PATH = 'config/slices.yaml'
@@ -53,6 +55,7 @@ def load_ap_vlan_map() -> dict[str, int]:
 		config = yaml.safe_load(f)
 	return {slice_cfg['ap']: slice_cfg['vlan'] for slice_cfg in config['slices'].values()}
 
+
 def load_stats_interval() -> int:
 	with open(TOPOLOGY_CONFIG_PATH) as f:
 		config = yaml.safe_load(f)
@@ -71,8 +74,12 @@ class CampusController(app_manager.OSKenApp):
 		set_ap_vlan_map(load_ap_vlan_map())
 		self.meter_manager = MeterManager()
 		self.stats_collector = StatsCollector(interval_sec=load_stats_interval())
+		self.agent_manager = AgentManager()
+		self.traffic_manager = TrafficManager()
 		self.stats_collector.start()
-		registry.register(self.stats_collector, self.meter_manager)
+		registry.register(
+			self.stats_collector, self.meter_manager, self.agent_manager, self.traffic_manager
+		)
 		start_api_server(host='0.0.0.0', port=8080)
 
 	@set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)

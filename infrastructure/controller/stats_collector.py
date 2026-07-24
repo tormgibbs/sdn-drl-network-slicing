@@ -87,12 +87,6 @@ class StatsCollector:
 				self._topology = yaml.safe_load(f)
 		return self._topology
 
-	def _get_traffic(self) -> dict:
-		if self._traffic is None:
-			with open(_TRAFFIC_CONFIG) as f:
-				self._traffic = yaml.safe_load(f)
-		return self._traffic
-
 	def _get_slices(self) -> dict:
 		if self._slices is None:
 			with open(self._slices_config) as f:
@@ -149,7 +143,7 @@ class StatsCollector:
 					obj = json.loads(line)
 					if obj.get('event') == 'interval':
 						last_interval = obj['data']['sum']
-				except json.JSONDecodeError, KeyError:
+				except (json.JSONDecodeError, KeyError):
 					continue
 
 			if last_interval is None:

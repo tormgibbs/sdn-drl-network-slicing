@@ -163,8 +163,8 @@ def create_topology():
 		# transfer (esnet/iperf#1735, unresolved upstream) -- timeout forces
 		# a kill so the loop can respawn instead of staying stuck.
 		cmd = (
-			f'while true; do timeout 90s iperf3 -s -1 -p {port} '
-			f'-i 1 --json-stream --forceflush; '
+			f'while true; do timeout 300s iperf3 -s -1 -p {port} '
+			f'-i 1 --json-stream --forceflush --idle-timeout 30; '
 			f'done > {logfile} 2>&1 &'
 		)
 		node.cmd(cmd)
