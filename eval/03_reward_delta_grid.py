@@ -115,13 +115,19 @@ def run_analysis(
 		rates_policy = dict(
 			zip(slice_order, project_allocation(fracs, floors_kbps, C_kbps))
 		)
-		r_policy = full_reward(rates_policy, metrics, slice_order, slices_cfg)
+
+		r_policy = full_reward(
+			rates_policy, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
+		)
 		found += 1
 
 		for name, (fi, ti) in counters.items():
 			cf = make_counter(fracs, fi, ti)
 			rates_c = dict(zip(slice_order, project_allocation(cf, floors_kbps, C_kbps)))
-			r_c = full_reward(rates_c, metrics, slice_order, slices_cfg)
+
+			r_c = full_reward(
+				rates_c, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
+			)
 			counter_deltas[name].append(r_c - r_policy)
 			if r_c > r_policy:
 				counter_wins[name] += 1
@@ -142,10 +148,16 @@ def run_analysis(
 			rates_policy = dict(
 				zip(slice_order, project_allocation(fracs, floors_kbps, C_kbps))
 			)
-			r_policy = full_reward(rates_policy, metrics, slice_order, slices_cfg)
+
+			r_policy = full_reward(
+				rates_policy, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
+			)
 			cf = make_counter(fracs, fi, ti, delta=delta)
 			rates_c = dict(zip(slice_order, project_allocation(cf, floors_kbps, C_kbps)))
-			r_c = full_reward(rates_c, metrics, slice_order, slices_cfg)
+			# FIX: Added prev_rates and C_kbps
+			r_c = full_reward(
+				rates_c, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
+			)
 			deltas.append(r_c - r_policy)
 			if r_c > r_policy:
 				wins += 1
@@ -244,7 +256,6 @@ def main() -> None:
 		for delta, win_rate, mean_delta in res['sweep_results']:
 			print(f'{delta:<10} {win_rate:<12.1%} {mean_delta:.5f}')
 
-	# Cross-model trend summary for the sweep counter, easy to eyeball together
 	if len(all_results) > 1:
 		print(
 			f'\n{"=" * 70}\nTREND SUMMARY: {args.sweep_counter} win_rate by delta, across models\n{"=" * 70}'
