@@ -34,23 +34,26 @@ export const SliceConfigSchema = z.object({
   min_throughput_bps: z.number(),
 });
 
-// NOTE: MetricSchema/Metric (below) is a near-duplicate of SliceMetricsSchema
-// above with different nullability (latency_ms/loss_pct nullable here, not
-// there). MetricsResponseSchema — the schema that actually validates the real
-// /ws/metrics envelope's `metrics` field — uses SliceMetricsSchema, NOT this
-// one. MetricSchema/Metric is currently disconnected from the real data
-// pipeline; it's only reachable via types/slice.ts's re-export and
-// `SliceMetrics` alias, and it's not yet confirmed whether anything actually
-// depends on that alias.
+// NOTE: MetricSchema/Metric is a near-duplicate of SliceMetricsSchema above
+// with different nullability (latency_ms/loss_pct nullable here, not there).
+// MetricsResponseSchema — which validates the real /ws/metrics envelope —
+// uses SliceMetricsSchema, NOT this one, so live WS data is never actually
+// null for these fields.
 //
-// Before consolidating or deleting either schema: (1) grep for MetricSchema
-// and `: Metric` usage across src/ to confirm what's really load-bearing, and
-// (2) check whether computeSlaStatus's call sites (slice-table.tsx, index.tsx,
-// the slice components) type their metric parameter as nullable defensively —
-// if so, tightening this schema later could surface those call sites as
-// having handled a null case that, per SliceMetricsSchema, never actually
-// occurs. See handoff doc Section 8 re: not deleting based on assumed-unused
-// names without verifying first.
+// CONFIRMED (grep + inspection, not just assumed): Metric IS load-bearing —
+// re-exported as SliceMetrics via types/slice.ts, and computeSlaStatus
+// (lib/sla.ts) genuinely branches on latency_ms !== null / loss_pct !== null.
+// Likely serves callers using mock/dashboard-shaped data (e.g. index.tsx's
+// initialData) where nulls may legitimately occur, unlike live WS data.
+// Do NOT delete or consolidate into SliceMetricsSchema — both schemas are
+// intentionally different and both are in active use.
+//
+// SEPARATE, UNRESOLVED ISSUE: types/slice.ts's SLAStatus ("NOMINAL" |
+// "WARNING" | "VIOLATION", used by computeSlaStatus) is a different type
+// from types/slice1.ts's SLAStatus ("MET" | "VIOLATION", used by all five
+// slice components). Same name, different shape, per Section 4/8 of the
+// handoff doc. Not yet reconciled — flag before assuming SLA status means
+// the same thing across index.tsx and the slice pages.
 export const MetricSchema = z.object({
   tx_throughput_bps: z.number(),
   latency_ms: z.number().nullable(),
@@ -87,6 +90,20 @@ export const TrafficStatusSchema = z.object({
   }).nullable(),
 });
 
+export const AgentControlRequestSchema = z.object({
+  action: z.enum(["start", "stop"]),
+  model_path: z.string().optional(),
+  vecnorm_path: z.string().optional(),
+});
+
+export const AgentStatusSchema = z.object({
+  running: z.boolean(),
+  last_result: AgentStateSchema.nullable(),
+});
+
+
+export type AgentControlRequest = z.infer<typeof AgentControlRequestSchema>;
+export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type TrafficStatus = z.infer<typeof TrafficStatusSchema>;
 export type TrafficScenarioRequest = z.infer<typeof TrafficScenarioRequestSchema>;
 export type WsMetricsEnvelope = z.infer<typeof WsMetricsEnvelopeSchema>;
