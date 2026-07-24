@@ -1,5 +1,4 @@
-// components/dashboard/side-panel.tsx
-import { Activity, ChartNoAxesCombined, Cpu, TrendingUp } from "lucide-react";
+import { Activity, ChartNoAxesCombined, Cpu, TrendingDown, TrendingUp } from "lucide-react";
 import { RadioGroup } from "./radio-group";
 import type { Mode, Scenario } from "#/types/slice";
 
@@ -19,6 +18,7 @@ type SidePanelProps = {
   controllerMode: Mode;
   scenarioMode: Scenario;
   slaSatisfaction: string;
+  reward: number | null;
   onModeChange: (mode: Mode) => void;
   onScenarioChange: (scenario: Scenario) => void;
 };
@@ -27,9 +27,13 @@ export function SidePanel({
   controllerMode,
   scenarioMode,
   slaSatisfaction,
+  reward,
   onModeChange,
   onScenarioChange,
 }: SidePanelProps) {
+  const showAgentPerformance = controllerMode === "agent" && reward !== null;
+  const isPositive = (reward ?? 0) >= 0;
+
   return (
     <div>
       {/* Controller Mode */}
@@ -58,8 +62,8 @@ export function SidePanel({
         />
       </div>
 
-      {/* Agent Performance — only when mode is agent */}
-      {controllerMode === "agent" && (
+      {/* Agent Performance — only when mode is agent AND live agent data exists */}
+      {showAgentPerformance && (
         <div className="mt-8 mb-4">
           <div className="flex gap-2">
             <ChartNoAxesCombined size={20} />
@@ -67,9 +71,16 @@ export function SidePanel({
           </div>
           <div className="my-4">
             <p className="uppercase">Reward Signal</p>
-            <p className="text-3xl font-bold text-green-500 flex items-center gap-2">
-              <span>+2.45</span>
-              <TrendingUp size={24} />
+            <p
+              className={`text-3xl font-bold flex items-center gap-2 ${
+                isPositive ? "text-green-500" : "text-red-500"
+              }`}
+            >
+              <span>
+                {isPositive ? "+" : ""}
+                {reward!.toFixed(2)}
+              </span>
+              {isPositive ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
             </p>
           </div>
           <div className="my-4">

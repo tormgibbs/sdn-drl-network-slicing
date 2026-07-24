@@ -1,4 +1,12 @@
-import { HealthResponseSchema, MetricsResponseSchema, AllocateResponseSchema, type AllocateRequest } from "./schemas";
+import {
+  HealthResponseSchema,
+  MetricsResponseSchema,
+  AllocateResponseSchema,
+  TrafficScenarioRequestSchema,
+  type AllocateRequest,
+  type TrafficScenarioRequest,
+  TrafficStatusSchema,
+} from "./schemas";
 
 const BASE_URL = "http://localhost:8080";
 
@@ -22,4 +30,18 @@ export async function postAllocate(body: AllocateRequest) {
   });
   if (!res.ok) throw new Error(`allocate failed: ${res.status}`);
   return AllocateResponseSchema.parse(await res.json());
+}
+
+export async function postTrafficScenario(body: TrafficScenarioRequest) {
+  TrafficScenarioRequestSchema.parse(body);
+  const res = await fetch(`${BASE_URL}/traffic/scenario`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => null);
+    throw new Error(errorBody?.detail ?? `scenario switch failed: ${res.status}`);
+  }
+  return TrafficStatusSchema.parse(await res.json());
 }

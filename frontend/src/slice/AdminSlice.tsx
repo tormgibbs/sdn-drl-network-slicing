@@ -2,11 +2,11 @@ import { Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, LineChart,
 import { SliceLayout } from "../components/primitives/Slicelayout";
 import { SliceTooltip } from "../components/primitives/SliceTooltip";
 import { ChartPanel } from "../components/primitives/slice-dashboard/chartpanel";
-import { ADMIN_SLA, genAdminTelemetry, buildAdminHistory } from "../data/slices";
-import { useSliceTelemetry } from "#/hooks/use-slicetelemetry";
+import { useLiveSliceData, type SliceSLA } from "#/hooks/use-live-slice-data";
 import { useReportSla } from "#/hooks/use-reportsla";
-import { buildRecentCycles } from "../utils/slice-utils"; 
 import type { SliceSharedProps } from "../types/sliceShared";
+
+const ADMIN_SLA: SliceSLA = { minThrpt: 10_000_000, maxLat: 150, maxLoss: 1.0 };
 
 export function AdminSlice({
   switcherTabs,
@@ -14,59 +14,76 @@ export function AdminSlice({
   onSliceChange,
   onSlaChange,
 }: SliceSharedProps) {
-  const { range, setRange, data, history } = useSliceTelemetry(
-    genAdminTelemetry,
-    buildAdminHistory,
-    3000,
-  );
+  const { current, history, slaMet, allocationBps } = useLiveSliceData("admin", ADMIN_SLA);
 
-  const last = data[data.length - 1] ?? { thrpt: 11.2, lat: 82, loss: 0.3, txRate: 3.8, flows: 47 };
-  const slaMet =
-    last.lat! <= ADMIN_SLA.maxLat &&
-    last.thrpt >= ADMIN_SLA.minThrpt &&
-    last.loss <= ADMIN_SLA.maxLoss;
+  useReportSla(slaMet ?? false, onSlaChange);
 
-  useReportSla(slaMet, onSlaChange);
+  const thrptMbps = current ? current.tx_throughput_bps / 1_000_000 : null;
+  const allocMbps = allocationBps !== null ? allocationBps / 1_000_000 : null;
 
-const recentCycles = buildRecentCycles(history);
+  const chartData = history.map((p, i) => ({
+    i,
+    thrpt: p.tx_throughput_bps / 1_000_000,
+    lat: p.latency_ms,
+    loss: p.loss_pct,
+  }));
+
+  const evalSla = (lat: number, thrpt: number, loss: number) =>
+    (lat <= ADMIN_SLA.maxLat && thrpt >= ADMIN_SLA.minThrpt && loss <= ADMIN_SLA.maxLoss
+      ? "MET"
+      : "VIOLATION") as "MET" | "VIOLATION";
+
+  const recentCycles = history
+    .slice(-7)
+    .reverse()
+    .map((p, i) => ({
+      id: `admin-${history.length - i}`,
+      thrpt: p.tx_throughput_bps / 1_000_000,
+      lat: p.latency_ms,
+      status: evalSla(p.latency_ms, p.tx_throughput_bps, p.loss_pct),
+    }));
+
+  const historyRows = history.map((p, i) => ({
+    ts: new Date(p.timestamp).toISOString(),
+    id: `admin-${i}`,
+    thrpt: p.tx_throughput_bps / 1_000_000,
+    lat: p.latency_ms,
+    loss: p.loss_pct,
+    alloc: allocMbps ?? 0,
+    sla: evalSla(p.latency_ms, p.tx_throughput_bps, p.loss_pct),
+  }));
 
   return (
     <SliceLayout
       switcherTabs={switcherTabs}
       activeSlice={activeSlice}
       onSliceChange={onSliceChange}
-      timeRange={range}
-      onTimeRangeChange={setRange}
+      timeRange="1M"
+      onTimeRangeChange={() => {}}
       telemetryLabel="Telemetry Timeline — Institutional Traffic (eMBB · Stable)"
       header={{
         name: "Admin Systems",
         priority: "P3",
-        slaMet,
-        metricChips: [
-          `${last.thrpt.toFixed(1)} Mbps`,
-          `${last.lat!.toFixed(1)}ms`,
-          `${last.loss.toFixed(2)}%`,
-        ],
-        extraChips: (
-          <>
-            <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/50 bg-white/5">
-              {last.txRate?.toFixed(1)} tx/s
-            </span>
-            <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/50 bg-white/5">
-              {last.flows} flows
-            </span>
-          </>
-        ),
+        slaMet: slaMet,
+        metricChips: current
+          ? [
+              `${thrptMbps!.toFixed(1)} Mbps`,
+              `${current.latency_ms.toFixed(1)}ms`,
+              `${current.loss_pct.toFixed(2)}%`,
+            ]
+          : ["— Mbps", "—ms", "—%"],
         slaTargets: "10 Mbps min\u00a0·\u00a0150ms max\u00a0·\u00a01% max",
       }}
       right={{
         currentState: [
-          { label: "THROUGHPUT", value: `${last.thrpt.toFixed(1)} Mbps` },
-          { label: "TX LATENCY", value: `${last.lat!.toFixed(1)}ms` },
-          { label: "PACKET LOSS", value: `${last.loss.toFixed(2)}%` },
-          { label: "TX RATE", value: `${last.txRate?.toFixed(1)} tx/s` },
-          { label: "ACTIVE FLOWS", value: String(last.flows) },
-          { label: "ALLOCATED", value: "10.0 Mbps", highlight: true },
+          { label: "THROUGHPUT", value: current ? `${thrptMbps!.toFixed(1)} Mbps` : "—" },
+          { label: "TX LATENCY", value: current ? `${current.latency_ms.toFixed(1)}ms` : "—" },
+          { label: "PACKET LOSS", value: current ? `${current.loss_pct.toFixed(2)}%` : "—" },
+          {
+            label: "ALLOCATED",
+            value: allocMbps !== null ? `${allocMbps.toFixed(1)} Mbps` : "AGENT INACTIVE",
+            highlight: true,
+          },
         ],
         slaThresholds: [
           { label: "MIN THRPT", value: "10 Mbps" },
@@ -77,12 +94,12 @@ const recentCycles = buildRecentCycles(history);
         recentCycles,
       }}
       history={{
-        rows: history,
+        rows: historyRows,
         title: "History — Last 50 Cycles — Admin Systems Slice",
       }}
     >
       <ChartPanel title="Throughput">
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
           <defs>
             <linearGradient id="gAdThrpt" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#EAB308" stopOpacity={0.2} />
@@ -94,62 +111,33 @@ const recentCycles = buildRecentCycles(history);
           <YAxis domain={[5, 20]} tickCount={4} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={ADMIN_SLA.minThrpt}
+            y={10}
             stroke="#6B7280"
             strokeDasharray="4 3"
-            label={{
-              value: "SLA MIN",
-              position: "insideBottomLeft",
-              fill: "#6B7280",
-              fontSize: 9,
-              fontFamily: "JetBrains Mono,monospace",
-            }}
+            label={{ value: "SLA MIN", position: "insideBottomLeft", fill: "#6B7280", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
           />
-          <Area
-            type="monotone"
-            dataKey="thrpt"
-            name="Mbps"
-            stroke="#EAB308"
-            strokeWidth={1.5}
-            fill="url(#gAdThrpt)"
-            dot={false}
-            isAnimationActive={false}
-          />
+          <Area type="monotone" dataKey="thrpt" name="Mbps" stroke="#EAB308" strokeWidth={1.5} fill="url(#gAdThrpt)" dot={false} isAnimationActive={false} />
         </AreaChart>
       </ChartPanel>
 
       <ChartPanel title="Transaction Latency">
-        <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
           <CartesianGrid strokeDasharray="2 4" />
           <XAxis dataKey="i" hide />
           <YAxis domain={[0, 200]} tickCount={5} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={ADMIN_SLA.maxLat}
+            y={150}
             stroke="#FB2C36"
             strokeDasharray="4 3"
-            label={{
-              value: "SLA MAX",
-              position: "insideTopLeft",
-              fill: "#FB2C36",
-              fontSize: 9,
-              fontFamily: "JetBrains Mono,monospace",
-            }}
+            label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#FB2C36", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
           />
-          <Line
-            type="monotone"
-            dataKey="lat"
-            name="ms"
-            stroke="#EAB308"
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-          />
+          <Line type="monotone" dataKey="lat" name="ms" stroke="#EAB308" strokeWidth={1.5} dot={false} isAnimationActive={false} />
         </LineChart>
       </ChartPanel>
 
       <ChartPanel title="Packet Loss">
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
           <defs>
             <linearGradient id="gAdLoss" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#FB2C36" stopOpacity={0.15} />
@@ -161,52 +149,12 @@ const recentCycles = buildRecentCycles(history);
           <YAxis domain={[0, 2]} tickCount={4} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={ADMIN_SLA.maxLoss}
+            y={1.0}
             stroke="#EAB308"
             strokeDasharray="4 3"
-            label={{
-              value: "SLA MAX",
-              position: "insideTopLeft",
-              fill: "#EAB308",
-              fontSize: 9,
-              fontFamily: "JetBrains Mono,monospace",
-            }}
+            label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#EAB308", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
           />
-          <Area
-            type="monotone"
-            dataKey="loss"
-            name="%"
-            stroke="#FB2C36"
-            strokeWidth={1.5}
-            fill="url(#gAdLoss)"
-            dot={false}
-            isAnimationActive={false}
-          />
-        </AreaChart>
-      </ChartPanel>
-
-      <ChartPanel title="Transaction Rate">
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-          <defs>
-            <linearGradient id="gAdTx" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#EAB308" stopOpacity={0.15} />
-              <stop offset="95%" stopColor="#EAB308" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="2 4" />
-          <XAxis dataKey="i" hide />
-          <YAxis domain={[0, 10]} tickCount={4} />
-          <Tooltip content={<SliceTooltip />} />
-          <Area
-            type="stepAfter"
-            dataKey="txRate"
-            name="tx/s"
-            stroke="#EAB308"
-            strokeWidth={1.5}
-            fill="url(#gAdTx)"
-            dot={false}
-            isAnimationActive={false}
-          />
+          <Area type="monotone" dataKey="loss" name="%" stroke="#FB2C36" strokeWidth={1.5} fill="url(#gAdLoss)" dot={false} isAnimationActive={false} />
         </AreaChart>
       </ChartPanel>
     </SliceLayout>

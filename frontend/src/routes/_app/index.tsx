@@ -5,6 +5,7 @@ import { computeSlaStatus } from "#/lib/sla";
 import { SliceTable } from "#/components/primitives/slice-table.tsx";
 import { PerformanceCharts } from "#/components/primitives/performance-charts";
 import { SidePanel } from "#/components/primitives/side-panel";
+import { useLiveMetricsStore } from "#/stores/live-metrics-store";
 import type { Mode, Scenario } from "#/types/slice";
 
 export const Route = createFileRoute("/_app/")({ component: Home });
@@ -12,6 +13,9 @@ export const Route = createFileRoute("/_app/")({ component: Home });
 function Home() {
   const [controllerMode, setControllerMode] = useState<Mode>("agent");
   const [scenarioMode, setScenarioMode] = useState<Scenario>("normal");
+
+  const liveMetrics = useLiveMetricsStore((s) => s.metrics);
+  const agent = useLiveMetricsStore((s) => s.agent);
 
   const dynamicData = getDynamicState(controllerMode, scenarioMode);
 
@@ -30,21 +34,29 @@ function Home() {
       dynamicData.metrics.general.tx_throughput_bps) /
     1_000_000;
 
-  const sliceKeys = Object.keys(initialData.slices) as Array<
-    keyof typeof initialData.slices
-  >;
+  const sliceKeys = Object.keys(
+    initialData.slices,
+  ) as Array<keyof typeof initialData.slices>;
 
   const breachedSlice = sliceKeys.find((key) => {
     const latency = dynamicData.metrics[key].latency_ms ?? 0;
     return latency > initialData.slices[key].max_latency_ms;
   });
 
+  // slaSatisfaction for SidePanel: live-sourced once the WS delivers metrics,
+  // falls back to mock data before the first tick arrives. Main dashboard
+  // (SliceTable/PerformanceCharts) stays on dynamicData for now — full
+  // index.tsx rewire (mode derivation, scenario POST) is a separate,
+  // later task per Section 10 — do not partially migrate it here.
+  const slaSourceMetrics = liveMetrics ?? dynamicData.metrics;
   const nominalCount = sliceKeys.filter(
     (key) =>
-      computeSlaStatus(dynamicData.metrics[key], initialData.slices[key]) ===
+      computeSlaStatus(slaSourceMetrics[key], initialData.slices[key]) ===
       "NOMINAL",
   ).length;
   const slaSatisfaction = ((nominalCount / sliceKeys.length) * 100).toFixed(1);
+
+  const reward = agent?.reward ?? null;
 
   return (
     <div className="text-foreground p-4 flex justify-between gap-8">
@@ -68,6 +80,7 @@ function Home() {
         controllerMode={controllerMode}
         scenarioMode={scenarioMode}
         slaSatisfaction={slaSatisfaction}
+        reward={reward}
         onModeChange={setControllerMode}
         onScenarioChange={setScenarioMode}
       />

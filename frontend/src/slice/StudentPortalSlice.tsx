@@ -2,11 +2,11 @@ import { Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, LineChart,
 import { SliceLayout } from "../components/primitives/Slicelayout";
 import { SliceTooltip } from "../components/primitives/SliceTooltip";
 import { ChartPanel } from "../components/primitives/slice-dashboard/chartpanel";
-import { STUDENT_PORTAL_SLA, genStudentPortalTelemetry, buildStudentPortalHistory } from "../data/slices";
-import { useSliceTelemetry } from "#/hooks/use-slicetelemetry";
+import { useLiveSliceData, type SliceSLA } from "#/hooks/use-live-slice-data";
 import { useReportSla } from "#/hooks/use-reportsla";
-import { buildRecentCycles } from "../utils/slice-utils";
 import type { SliceSharedProps } from "../types/sliceShared";
+
+const STUDENT_PORTAL_SLA: SliceSLA = { minThrpt: 25_000_000, maxLat: 50, maxLoss: 0.1 };
 
 export function StudentPortalSlice({
   switcherTabs,
@@ -14,59 +14,76 @@ export function StudentPortalSlice({
   onSliceChange,
   onSlaChange,
 }: SliceSharedProps) {
-  const { range, setRange, data, history } = useSliceTelemetry(
-    genStudentPortalTelemetry,
-    buildStudentPortalHistory,
-    3000,
-  );
+  const { current, history, slaMet, allocationBps } = useLiveSliceData("student_portal", STUDENT_PORTAL_SLA);
 
-  const last = data[data.length - 1] ?? { thrpt: 26.1, lat: 28, loss: 0.0, reqRate: 5.2, sessions: 142 };
-  const slaMet =
-    last.lat! <= STUDENT_PORTAL_SLA.maxLat &&
-    last.thrpt >= STUDENT_PORTAL_SLA.minThrpt &&
-    last.loss <= STUDENT_PORTAL_SLA.maxLoss;
+  useReportSla(slaMet ?? false, onSlaChange);
 
-  useReportSla(slaMet, onSlaChange);
+  const thrptMbps = current ? current.tx_throughput_bps / 1_000_000 : null;
+  const allocMbps = allocationBps !== null ? allocationBps / 1_000_000 : null;
 
-  const recentCycles = buildRecentCycles(history);
+  const chartData = history.map((p, i) => ({
+    i,
+    thrpt: p.tx_throughput_bps / 1_000_000,
+    lat: p.latency_ms,
+    loss: p.loss_pct,
+  }));
+
+  const evalSla = (lat: number, thrpt: number, loss: number) =>
+    (lat <= STUDENT_PORTAL_SLA.maxLat && thrpt >= STUDENT_PORTAL_SLA.minThrpt && loss <= STUDENT_PORTAL_SLA.maxLoss
+      ? "MET"
+      : "VIOLATION") as "MET" | "VIOLATION";
+
+  const recentCycles = history
+    .slice(-7)
+    .reverse()
+    .map((p, i) => ({
+      id: `sp-${history.length - i}`,
+      thrpt: p.tx_throughput_bps / 1_000_000,
+      lat: p.latency_ms,
+      status: evalSla(p.latency_ms, p.tx_throughput_bps, p.loss_pct),
+    }));
+
+  const historyRows = history.map((p, i) => ({
+    ts: new Date(p.timestamp).toISOString(),
+    id: `sp-${i}`,
+    thrpt: p.tx_throughput_bps / 1_000_000,
+    lat: p.latency_ms,
+    loss: p.loss_pct,
+    alloc: allocMbps ?? 0,
+    sla: evalSla(p.latency_ms, p.tx_throughput_bps, p.loss_pct),
+  }));
 
   return (
     <SliceLayout
       switcherTabs={switcherTabs}
       activeSlice={activeSlice}
       onSliceChange={onSliceChange}
-      timeRange={range}
-      onTimeRangeChange={setRange}
+      timeRange="1M"
+      onTimeRangeChange={() => {}}
       telemetryLabel="Telemetry Timeline — HTTP Transaction Traffic (eMBB)"
       header={{
         name: "Student Portal",
         priority: "P4",
-        slaMet,
-        metricChips: [
-          `${last.thrpt.toFixed(1)} Mbps`,
-          `${last.lat!.toFixed(1)}ms`,
-          `${last.loss.toFixed(3)}%`,
-        ],
-        extraChips: (
-          <>
-            <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/50 bg-white/5">
-              {last.reqRate?.toFixed(1)} req/s
-            </span>
-            <span className="font-mono text-[11px] px-2 py-0.5 rounded border border-white/10 text-white/50 bg-white/5">
-              {last.sessions} sessions
-            </span>
-          </>
-        ),
+        slaMet: slaMet,
+        metricChips: current
+          ? [
+              `${thrptMbps!.toFixed(1)} Mbps`,
+              `${current.latency_ms.toFixed(1)}ms`,
+              `${current.loss_pct.toFixed(3)}%`,
+            ]
+          : ["— Mbps", "—ms", "—%"],
         slaTargets: "25 Mbps min\u00a0·\u00a050ms max\u00a0·\u00a00.1% max",
       }}
       right={{
         currentState: [
-          { label: "THROUGHPUT", value: `${last.thrpt.toFixed(1)} Mbps` },
-          { label: "RESP LATENCY", value: `${last.lat!.toFixed(1)}ms` },
-          { label: "PACKET LOSS", value: `${last.loss.toFixed(3)}%` },
-          { label: "REQ RATE", value: `${last.reqRate?.toFixed(1)} req/s` },
-          { label: "SESSIONS", value: String(last.sessions) },
-          { label: "ALLOCATED", value: "25.0 Mbps", highlight: true },
+          { label: "THROUGHPUT", value: current ? `${thrptMbps!.toFixed(1)} Mbps` : "—" },
+          { label: "RESP LATENCY", value: current ? `${current.latency_ms.toFixed(1)}ms` : "—" },
+          { label: "PACKET LOSS", value: current ? `${current.loss_pct.toFixed(3)}%` : "—" },
+          {
+            label: "ALLOCATED",
+            value: allocMbps !== null ? `${allocMbps.toFixed(1)} Mbps` : "AGENT INACTIVE",
+            highlight: true,
+          },
         ],
         slaThresholds: [
           { label: "MIN THRPT", value: "25 Mbps" },
@@ -77,12 +94,12 @@ export function StudentPortalSlice({
         recentCycles,
       }}
       history={{
-        rows: history,
+        rows: historyRows,
         title: "History — Last 50 Cycles — Student Portal Slice",
       }}
     >
       <ChartPanel title="Throughput">
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
           <defs>
             <linearGradient id="gSpThrpt" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#2B7FFF" stopOpacity={0.2} />
@@ -94,62 +111,33 @@ export function StudentPortalSlice({
           <YAxis domain={[10, 40]} tickCount={4} />
           <Tooltip content={<SliceTooltip decimals={2} />} />
           <ReferenceLine
-            y={STUDENT_PORTAL_SLA.minThrpt}
+            y={25}
             stroke="#6B7280"
             strokeDasharray="4 3"
-            label={{
-              value: "SLA MIN",
-              position: "insideBottomLeft",
-              fill: "#6B7280",
-              fontSize: 9,
-              fontFamily: "JetBrains Mono,monospace",
-            }}
+            label={{ value: "SLA MIN", position: "insideBottomLeft", fill: "#6B7280", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
           />
-          <Area
-            type="monotone"
-            dataKey="thrpt"
-            name="Mbps"
-            stroke="#2B7FFF"
-            strokeWidth={1.5}
-            fill="url(#gSpThrpt)"
-            dot={false}
-            isAnimationActive={false}
-          />
+          <Area type="monotone" dataKey="thrpt" name="Mbps" stroke="#2B7FFF" strokeWidth={1.5} fill="url(#gSpThrpt)" dot={false} isAnimationActive={false} />
         </AreaChart>
       </ChartPanel>
 
       <ChartPanel title="HTTP Response Latency">
-        <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
           <CartesianGrid strokeDasharray="2 4" />
           <XAxis dataKey="i" hide />
           <YAxis domain={[0, 80]} tickCount={5} />
           <Tooltip content={<SliceTooltip decimals={3} />} />
           <ReferenceLine
-            y={STUDENT_PORTAL_SLA.maxLat}
+            y={50}
             stroke="#FB2C36"
             strokeDasharray="4 3"
-            label={{
-              value: "SLA MAX",
-              position: "insideTopLeft",
-              fill: "#FB2C36",
-              fontSize: 9,
-              fontFamily: "JetBrains Mono,monospace",
-            }}
+            label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#FB2C36", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
           />
-          <Line
-            type="monotone"
-            dataKey="lat"
-            name="ms"
-            stroke="#2B7FFF"
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-          />
+          <Line type="monotone" dataKey="lat" name="ms" stroke="#2B7FFF" strokeWidth={1.5} dot={false} isAnimationActive={false} />
         </LineChart>
       </ChartPanel>
 
       <ChartPanel title="Packet Loss">
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+        <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
           <defs>
             <linearGradient id="gSpLoss" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#FB2C36" stopOpacity={0.15} />
@@ -161,52 +149,12 @@ export function StudentPortalSlice({
           <YAxis domain={[0, 0.3]} tickCount={4} />
           <Tooltip content={<SliceTooltip decimals={3} />} />
           <ReferenceLine
-            y={STUDENT_PORTAL_SLA.maxLoss}
+            y={0.1}
             stroke="#EAB308"
             strokeDasharray="4 3"
-            label={{
-              value: "SLA MAX",
-              position: "insideTopLeft",
-              fill: "#EAB308",
-              fontSize: 9,
-              fontFamily: "JetBrains Mono,monospace",
-            }}
+            label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#EAB308", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
           />
-          <Area
-            type="monotone"
-            dataKey="loss"
-            name="%"
-            stroke="#FB2C36"
-            strokeWidth={1.5}
-            fill="url(#gSpLoss)"
-            dot={false}
-            isAnimationActive={false}
-          />
-        </AreaChart>
-      </ChartPanel>
-
-      <ChartPanel title="Concurrent HTTP Sessions">
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-          <defs>
-            <linearGradient id="gSpSess" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#4ADE80" stopOpacity={0.2} />
-              <stop offset="95%" stopColor="#4ADE80" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="2 4" />
-          <XAxis dataKey="i" hide />
-          <YAxis domain={[0, 250]} tickCount={4} />
-          <Tooltip content={<SliceTooltip decimals={0} />} />
-          <Area
-            type="monotone"
-            dataKey="sessions"
-            name="sessions"
-            stroke="#4ADE80"
-            strokeWidth={1.5}
-            fill="url(#gSpSess)"
-            dot={false}
-            isAnimationActive={false}
-          />
+          <Area type="monotone" dataKey="loss" name="%" stroke="#FB2C36" strokeWidth={1.5} fill="url(#gSpLoss)" dot={false} isAnimationActive={false} />
         </AreaChart>
       </ChartPanel>
     </SliceLayout>

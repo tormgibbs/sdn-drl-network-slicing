@@ -34,6 +34,23 @@ export const SliceConfigSchema = z.object({
   min_throughput_bps: z.number(),
 });
 
+// NOTE: MetricSchema/Metric (below) is a near-duplicate of SliceMetricsSchema
+// above with different nullability (latency_ms/loss_pct nullable here, not
+// there). MetricsResponseSchema — the schema that actually validates the real
+// /ws/metrics envelope's `metrics` field — uses SliceMetricsSchema, NOT this
+// one. MetricSchema/Metric is currently disconnected from the real data
+// pipeline; it's only reachable via types/slice.ts's re-export and
+// `SliceMetrics` alias, and it's not yet confirmed whether anything actually
+// depends on that alias.
+//
+// Before consolidating or deleting either schema: (1) grep for MetricSchema
+// and `: Metric` usage across src/ to confirm what's really load-bearing, and
+// (2) check whether computeSlaStatus's call sites (slice-table.tsx, index.tsx,
+// the slice components) type their metric parameter as nullable defensively —
+// if so, tightening this schema later could surface those call sites as
+// having handled a null case that, per SliceMetricsSchema, never actually
+// occurs. See handoff doc Section 8 re: not deleting based on assumed-unused
+// names without verifying first.
 export const MetricSchema = z.object({
   tx_throughput_bps: z.number(),
   latency_ms: z.number().nullable(),
@@ -48,8 +65,6 @@ export const AgentStateSchema = z.object({
   done: z.boolean(),
 });
 
-export type AgentState = z.infer<typeof AgentStateSchema>;
-
 // The actual full envelope /ws/metrics now sends
 export const WsMetricsEnvelopeSchema = z.object({
   timestamp: z.string(),
@@ -57,14 +72,25 @@ export const WsMetricsEnvelopeSchema = z.object({
   agent: AgentStateSchema.nullable(),
 });
 
-export type WsMetricsEnvelope = z.infer<typeof WsMetricsEnvelopeSchema>;
-
 export const TrafficScenarioRequestSchema = z.object({
   scenario: z.string(),
 });
 
-export type TrafficScenarioRequest = z.infer<typeof TrafficScenarioRequestSchema>;
+export const TrafficStatusSchema = z.object({
+  running: z.boolean(),
+  last_loop: z.object({
+    loop: z.number(),
+    scenario: z.string(),
+    results: z.record(z.string(), z.unknown()),
+    failed_slices: z.array(z.string()),
+    timestamp: z.string(),
+  }).nullable(),
+});
 
+export type TrafficStatus = z.infer<typeof TrafficStatusSchema>;
+export type TrafficScenarioRequest = z.infer<typeof TrafficScenarioRequestSchema>;
+export type WsMetricsEnvelope = z.infer<typeof WsMetricsEnvelopeSchema>;
+export type AgentState = z.infer<typeof AgentStateSchema>;
 export type SliceConfig = z.infer<typeof SliceConfigSchema>;
 export type Metric = z.infer<typeof MetricSchema>;
 export type MetricsResponse = z.infer<typeof MetricsResponseSchema>;
