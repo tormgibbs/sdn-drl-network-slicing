@@ -29,6 +29,9 @@ _CONGESTION_THRESHOLD = 0.85
 _TUNNEL_WAIT_TIMEOUT_SEC = 60
 _TUNNEL_WAIT_POLL_SEC = 2
 
+_WS_CONNECT_MAX_RETRIES = 10
+_WS_CONNECT_RETRY_DELAY_SEC = 1
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,11 +89,31 @@ class CampusSlicingEnv(gym.Env):
 	def _connect_ws(self) -> None:
 		if self._ws is not None:
 			self._ws.close()
-		self._ws = ws_connect(WS_URL)
+
+		last_exc = None
+		for attempt in range(_WS_CONNECT_MAX_RETRIES):
+			try:
+				self._ws = ws_connect(WS_URL)
+				return
+			except OSError as exc:
+				last_exc = exc
+				logger.info(
+					'WS connect attempt %d/%d failed: %s',
+					attempt + 1,
+					_WS_CONNECT_MAX_RETRIES,
+					exc,
+				)
+				time.sleep(_WS_CONNECT_RETRY_DELAY_SEC)
+		raise RuntimeError(
+			f'could not connect to {WS_URL} after {_WS_CONNECT_MAX_RETRIES} attempts'
+		) from last_exc
 
 	def _wait_for_stats(self) -> dict:
 		raw = self._ws.recv()
-		return json.loads(raw)
+		return json.loads(raw)['metrics']
+
+	def get_current_allocation(self) -> dict[str, int]:
+		return dict(self._current_rates_kbps) if self._current_rates_kbps else {}
 
 	def close(self) -> None:
 		if self._ws is not None:

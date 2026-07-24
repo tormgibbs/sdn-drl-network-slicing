@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +22,28 @@ class _Registry:
 	def __init__(self):
 		self._stats_collector = None
 		self._meter_manager = None
+		self._agent_manager = None
+		self._traffic_manager = None
 		self._frozen = False
 		self.loop = None
 		self.ws_clients = set()
 
-	def register(self, stats_collector, meter_manager) -> None:
+	def register(
+		self, stats_collector, meter_manager, agent_manager, traffic_manager
+	) -> None:
 		if self._frozen:
 			raise RuntimeError('Registry is already frozen')
 		self._stats_collector = stats_collector
 		self._meter_manager = meter_manager
+		self._agent_manager = agent_manager
+		self._traffic_manager = traffic_manager
 		self._frozen = True
 
 	def reset(self) -> None:
 		self._stats_collector = None
 		self._meter_manager = None
+		self._agent_manager = None
+		self._traffic_manager = None
 		self._frozen = False
 
 	@property
@@ -44,6 +53,14 @@ class _Registry:
 	@property
 	def meter_manager(self):
 		return self._meter_manager
+
+	@property
+	def agent_manager(self):
+		return self._agent_manager
+
+	@property
+	def traffic_manager(self):
+		return self._traffic_manager
 
 	@property
 	def frozen(self):
@@ -110,10 +127,23 @@ async def ws_metrics(websocket: WebSocket):
 
 
 async def broadcast_metrics(data: dict) -> None:
+	import datetime as _dt
+
+	am = registry.agent_manager
+	agent_status = await run_in_threadpool(am.status) if am is not None else None
+
+	payload = {
+		'timestamp': _dt.datetime.now(_dt.timezone.utc).isoformat(),
+		'metrics': data,
+		'agent': agent_status['last_result']
+		if agent_status and agent_status['running']
+		else None,
+	}
+
 	dead = set()
 	for ws in registry.ws_clients:
 		try:
-			await ws.send_json(data)
+			await ws.send_json(payload)
 		except Exception:
 			dead.add(ws)
 	registry.ws_clients -= dead
@@ -166,6 +196,87 @@ def allocate(allocations: dict[str, float]):
 
 	return {'status': 'ok', 'rates_kbps': rates_kbps}
 
+
+@app.get('/agent/state')
+def agent_state():
+	am = registry.agent_manager
+	if am is None:
+		raise HTTPException(status_code=503, detail='Agent manager not available')
+	return am.status()
+
+
+@app.post('/agent/control')
+def agent_control(body: dict):
+	am = registry.agent_manager
+	if am is None:
+		raise HTTPException(status_code=503, detail='Agent manager not available')
+
+	action = body.get('action')
+	if action == 'start':
+		model_path = body.get('model_path')
+		if not model_path:
+			raise HTTPException(status_code=422, detail='model_path required to start')
+		try:
+			am.start(model_path, body.get('vecnorm_path'))
+		except RuntimeError as exc:
+			raise HTTPException(status_code=409, detail=str(exc)) from exc
+	elif action == 'stop':
+		am.stop()
+	else:
+		raise HTTPException(status_code=422, detail=f'Unknown action: {action!r}')
+
+	return am.status()
+
+
+@app.get('/traffic/state')
+def traffic_state():
+	tm = registry.traffic_manager
+	if tm is None:
+		raise HTTPException(status_code=503, detail='Traffic manager not available')
+	return tm.status()
+
+
+@app.post('/traffic/control')
+def traffic_control(body: dict):
+	tm = registry.traffic_manager
+	if tm is None:
+		raise HTTPException(status_code=503, detail='Traffic manager not available')
+
+	action = body.get('action')
+	if action == 'start':
+		try:
+			tm.start(
+				slices=body.get('slices'),
+				loops=body.get('loops', 0),
+				scenario=body.get('scenario'),
+				seed=body.get('seed'),
+			)
+		except RuntimeError as exc:
+			raise HTTPException(status_code=409, detail=str(exc)) from exc
+	elif action == 'stop':
+		tm.stop()
+	else:
+		raise HTTPException(status_code=422, detail=f'Unknown action: {action!r}')
+
+	return tm.status()
+
+
+@app.post('/traffic/scenario')
+def traffic_scenario(body: dict):
+	tm = registry.traffic_manager
+	if tm is None:
+		raise HTTPException(status_code=503, detail='Traffic manager not available')
+
+	scenario_name = body.get('scenario')
+	if not scenario_name:
+		raise HTTPException(status_code=422, detail='scenario required')
+
+	try:
+		tm.set_scenario(scenario_name)
+	except (RuntimeError, ValueError) as exc:
+		raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+	return tm.status()
 
 
 def start_api_server(host: str = '0.0.0.0', port: int = 8080) -> None:
