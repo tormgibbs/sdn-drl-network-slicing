@@ -13,6 +13,7 @@ from os_ken.base import app_manager
 from os_ken.controller import ofp_event
 from os_ken.controller.handler import (
 	CONFIG_DISPATCHER,
+	DEAD_DISPATCHER,
 	MAIN_DISPATCHER,
 	set_ev_cls,
 )
