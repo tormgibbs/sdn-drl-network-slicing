@@ -143,7 +143,7 @@ class StatsCollector:
 					obj = json.loads(line)
 					if obj.get('event') == 'interval':
 						last_interval = obj['data']['sum']
-				except (json.JSONDecodeError, KeyError):
+				except json.JSONDecodeError, KeyError:
 					continue
 
 			if last_interval is None:
@@ -317,6 +317,11 @@ class StatsCollector:
 		while self._running:
 			try:
 				cycle_start = time.time()
+
+				meter_manager = rest_api.registry.meter_manager
+				if meter_manager is not None:
+					meter_manager.check_barrier_watchdog()
+
 				with self._cache_lock:
 					self._pending_throughput.clear()
 				self._reply_count = 0
@@ -708,6 +713,18 @@ class StatsCollector:
 				identity['config_file'],
 				probe_interface,
 			)
+
+		meter_manager = rest_api.registry.meter_manager
+		if meter_manager is not None:
+			confirmed_time = meter_manager.get_change_confirmed_time()
+			settle_sec = self._get_topology()['controller'].get('meter_settle_sec', 0.5)
+			if confirmed_time > 0 and time.time() - confirmed_time < settle_sec:
+				logger.debug(
+					'Stats collector: within %.2fs post-allocation settle window -- '
+					'skipping cache update, keeping last known values',
+					settle_sec,
+				)
+				return
 
 		with self._cache_lock:
 			for slice_name, probe in merged.items():
