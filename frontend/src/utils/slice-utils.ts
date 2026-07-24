@@ -1,6 +1,6 @@
-import type { SLAStatus } from "../types/slice1";
+import type { SliceCycleStatus } from "../types/slice1";
 
-export function buildRecentCycles<T extends { id: string; thrpt: number; lat: number | null; sla: SLAStatus }>(
+export function buildRecentCycles<T extends { id: string; thrpt: number; lat: number | null; sla: SliceCycleStatus }>(
   history: T[],
   count = 7,
 ) {

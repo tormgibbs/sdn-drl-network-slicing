@@ -48,12 +48,13 @@ export const SliceConfigSchema = z.object({
 // Do NOT delete or consolidate into SliceMetricsSchema — both schemas are
 // intentionally different and both are in active use.
 //
-// SEPARATE, UNRESOLVED ISSUE: types/slice.ts's SLAStatus ("NOMINAL" |
-// "WARNING" | "VIOLATION", used by computeSlaStatus) is a different type
-// from types/slice1.ts's SLAStatus ("MET" | "VIOLATION", used by all five
-// slice components). Same name, different shape, per Section 4/8 of the
-// handoff doc. Not yet reconciled — flag before assuming SLA status means
-// the same thing across index.tsx and the slice pages.
+// RESOLVED: the SLAStatus naming collision previously noted here (between
+// types/slice.ts's three-state SLAStatus and types/slice1.ts's two-state
+// version) has been fixed by renaming the latter to SliceCycleStatus. The
+// two-state per-slice-cycle concept and the three-state dashboard-level
+// concept are genuinely different things that happened to share a name —
+// no further action needed.
+
 export const MetricSchema = z.object({
   tx_throughput_bps: z.number(),
   latency_ms: z.number().nullable(),

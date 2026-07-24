@@ -1,7 +1,15 @@
 // ── Shared types for network slice pages ─────────────────────────────────────
 
 export type TimeRange = "1M" | "5M" | "15M";
-export type SLAStatus = "MET" | "VIOLATION";
+
+// Per-slice-cycle SLA status, used by the five individual slice detail pages
+// (VLE/Admin/StudentPortal/IoT/General). Deliberately distinct from
+// types/slice.ts's SLAStatus (NOMINAL | WARNING | VIOLATION), which is a
+// separate, dashboard-level concept used by computeSlaStatus/index.tsx and
+// sla-badge.tsx. These two used to share the name "SLAStatus" despite being
+// different types — renamed here to remove the collision. See schemas.ts
+// history for context if this resurfaces.
+export type SliceCycleStatus = "MET" | "VIOLATION";
 
 // SLA thresholds for a slice
 export interface SLAConfig {
@@ -39,7 +47,7 @@ export interface HistoryRow {
   lat:   number;
   loss:  number;
   alloc: number;
-  sla:   SLAStatus;
+  sla:   SliceCycleStatus;
 }
 
 // Recent-cycle mini table row (right-column panel)
@@ -47,7 +55,7 @@ export interface RecentCycle {
   id:     string;
   thrpt:  number;
   lat:    number;
-  status: SLAStatus;
+  status: SliceCycleStatus;
 }
 
 // IoT traffic source
