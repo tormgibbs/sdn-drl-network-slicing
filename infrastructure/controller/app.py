@@ -121,6 +121,14 @@ class CampusController(app_manager.OSKenApp):
 		if name in ('s2', 's3'):
 			self.stats_collector.handle_port_stats_reply(name, ev.msg.body)
 
+	@set_ev_cls(ofp_event.EventOFPMeterConfigStatsReply, MAIN_DISPATCHER)
+	def meter_config_reply_handler(self, ev):
+		datapath = ev.msg.datapath
+		dpid = datapath.id
+		name = self.dpid_to_name.get(dpid, '')
+		if name in ('s2', 's3'):
+			self.meter_manager.handle_meter_config_reply(name, ev.msg.body)
+
 	@set_ev_cls(
 		ofp_event.EventOFPPortDescStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
 	)

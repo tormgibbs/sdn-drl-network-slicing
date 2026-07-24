@@ -1,6 +1,7 @@
 # infrastructure/controller/meter_manager.py
 
 import logging
+import threading
 from pathlib import Path
 
 import yaml
@@ -35,6 +36,7 @@ class MeterManager:
 		self._slices_config = slices_config
 		self._datapaths: dict[str, object] = {}
 		self._installed_meter_ids: set[tuple[str, int]] = set()
+		self._meter_query_events: dict[str, threading.Event] = {}
 		self._current_allocations: dict[str, float] = {}
 		self._initialized = False
 		slices = self._load_slices()
@@ -54,9 +56,41 @@ class MeterManager:
 		)
 		return data
 
+	def _query_existing_meters(self, switch_name: str, datapath: object) -> None:
+		"""Controller restarts reset in-memory state but not OVS
+		so meters must be discovered, not assumed empty."""
+		ofp = datapath.ofproto
+		ofp_parser = datapath.ofproto_parser
+		event = threading.Event()
+		self._meter_query_events[switch_name] = event
+
+		req = ofp_parser.OFPMeterConfigStatsRequest(datapath, 0, ofp.OFPM_ALL)
+		datapath.send_msg(req)
+
+		if not event.wait(timeout=3.0):
+			logger.warning(
+				'Meter config query timed out for %s -- assuming no existing meters',
+				switch_name,
+			)
+
+	def handle_meter_config_reply(self, switch_name: str, body: list) -> None:
+		for meter in body:
+			self._installed_meter_ids.add((switch_name, meter.meter_id))
+		event = self._meter_query_events.pop(switch_name, None)
+		if event is not None:
+			event.set()
+		logger.info(
+			'Existing meters discovered on %s: %s',
+			switch_name,
+			[m.meter_id for m in body],
+		)
+
 	def register_datapath(self, switch_name: str, datapath: object) -> None:
 		self._datapaths[switch_name] = datapath
 		logger.info('Datapath registered: %s', switch_name)
+
+		if switch_name in _AGGREGATION_SWITCHES:
+			self._query_existing_meters(switch_name, datapath)
 
 		if not _AGGREGATION_SWITCHES.issubset(self._datapaths.keys()):
 			return
@@ -72,11 +106,10 @@ class MeterManager:
 				switch_name,
 			)
 
-			# OVS clears meters on disconnect, so stale entries here would wrongly
-			# trigger MODIFY instead of ADD when this switch reconnects.
 			self._installed_meter_ids = {
 				(sw, mid) for (sw, mid) in self._installed_meter_ids if sw != switch_name
 			}
+			self._query_existing_meters(switch_name, datapath)
 
 			slices = self._load_slices()
 			self._install_meters_for_switch(
