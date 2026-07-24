@@ -121,7 +121,9 @@ class CampusController(app_manager.OSKenApp):
 		if name in ('s2', 's3'):
 			self.stats_collector.handle_port_stats_reply(name, ev.msg.body)
 
-	@set_ev_cls(ofp_event.EventOFPMeterConfigStatsReply, MAIN_DISPATCHER)
+	@set_ev_cls(
+		ofp_event.EventOFPMeterConfigStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
+	)
 	def meter_config_reply_handler(self, ev):
 		datapath = ev.msg.datapath
 		dpid = datapath.id
