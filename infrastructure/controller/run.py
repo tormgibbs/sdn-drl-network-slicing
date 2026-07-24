@@ -34,4 +34,4 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from os_ken.base.app_manager import AppManager
 
 if __name__ == '__main__':
-	AppManager.run_apps(['infrastructure.controller.app'])
+	AppManager.run_apps(['infrastructure.controller.app', 'scripts.diagnostics.barrier_timing_test'])

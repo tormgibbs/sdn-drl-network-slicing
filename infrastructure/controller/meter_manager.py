@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 from pathlib import Path
 
 import yaml
@@ -255,6 +256,9 @@ class MeterManager:
 				],
 			)
 		)
+
+		print(f'[BARRIER TEST] MeterMod sent switch={switch_name} at {time.time():.6f}')
+		datapath.send_msg(ofp_parser.OFPBarrierRequest(datapath))
 		self._installed_meter_ids.add(key)
 
 	def _install_meter_flow(
