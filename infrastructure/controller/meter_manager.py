@@ -34,6 +34,7 @@ class MeterManager:
 		self._topology_config = topology_config
 		self._slices_config = slices_config
 		self._datapaths: dict[str, object] = {}
+		self._installed_meter_ids: set[tuple[str, int]] = set()
 		self._current_allocations: dict[str, float] = {}
 		self._initialized = False
 		slices = self._load_slices()
@@ -64,11 +65,19 @@ class MeterManager:
 			logger.info('All aggregation switches registered -- installing default meters')
 			self._install_default_meters()
 			self._initialized = True
+
 		else:
 			logger.warning(
 				'Aggregation switch reconnected: %s -- re-applying current allocations',
 				switch_name,
 			)
+
+			# OVS clears meters on disconnect, so stale entries here would wrongly
+			# trigger MODIFY instead of ADD when this switch reconnects.
+			self._installed_meter_ids = {
+				(sw, mid) for (sw, mid) in self._installed_meter_ids if sw != switch_name
+			}
+
 			slices = self._load_slices()
 			self._install_meters_for_switch(
 				switch_name,
@@ -168,7 +177,7 @@ class MeterManager:
 
 			meter_id = _METER_ID_BY_AP[ap_name]
 
-			self._replace_meter(datapath, meter_id, rate_kbps)
+			self._replace_meter(datapath, switch_name, meter_id, rate_kbps)
 			self._install_meter_flow(datapath, meter_id, vlan_id, ap_port_no, core_port)
 
 			if vlan_id not in metered_vlans:
@@ -184,42 +193,31 @@ class MeterManager:
 				rate_kbps,
 			)
 
-	def _replace_meter(self, datapath: object, meter_id: int, rate_kbps: int) -> None:
-		"""
-		Replace an OpenFlow meter. rate_kbps must already be a final,
-		floor-respecting rate -- this function does not clamp or convert units.
-		"""
+	def _replace_meter(
+		self, datapath: object, switch_name: str, meter_id: int, rate_kbps: int
+	) -> None:
+		"""Modifies rate in place; avoids the delete/add gap where meter_id briefly doesn't exist."""
 		ofp = datapath.ofproto
 		ofp_parser = datapath.ofproto_parser
-
-		# OFPMC_MODIFY silently fails on OVS when the meter does not exist yet.
-		# Delete unconditionally before adding to guarantee consistent state.
-		datapath.send_msg(
-			ofp_parser.OFPMeterMod(
-				datapath=datapath,
-				command=ofp.OFPMC_DELETE,
-				flags=ofp.OFPMF_KBPS,
-				meter_id=meter_id,
-				bands=[],
-			)
-		)
-
 		rate_kbps = max(1, rate_kbps)
+		key = (switch_name, meter_id)
+
+		command = ofp.OFPMC_MODIFY if key in self._installed_meter_ids else ofp.OFPMC_ADD
+
 		datapath.send_msg(
 			ofp_parser.OFPMeterMod(
 				datapath=datapath,
-				command=ofp.OFPMC_ADD,
+				command=command,
 				flags=ofp.OFPMF_KBPS,
 				meter_id=meter_id,
 				bands=[
 					ofp_parser.OFPMeterBandDrop(
-						type_=ofp.OFPMBT_DROP,
-						rate=rate_kbps,
-						burst_size=0,
+						type_=ofp.OFPMBT_DROP, rate=rate_kbps, burst_size=0
 					)
 				],
 			)
 		)
+		self._installed_meter_ids.add(key)
 
 	def _install_meter_flow(
 		self, datapath: object, meter_id: int, vlan_id: int, in_port: int, out_port: int
