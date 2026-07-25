@@ -35,6 +35,7 @@ from infrastructure.controller.flow_manager import (
 	set_ap_vlan_map,
 	set_dpid_map,
 )
+from infrastructure.controller.heuristic_manager import HeuristicManager
 from infrastructure.controller.meter_manager import MeterManager
 from infrastructure.controller.rest_api import registry, start_api_server
 from infrastructure.controller.stats_collector import StatsCollector
@@ -81,9 +82,14 @@ class CampusController(app_manager.OSKenApp):
 		self.stats_collector = StatsCollector(interval_sec=load_stats_interval())
 		self.agent_manager = AgentManager()
 		self.traffic_manager = TrafficManager()
+		self.heuristic_manager = HeuristicManager()
 		self.stats_collector.start()
 		registry.register(
-			self.stats_collector, self.meter_manager, self.agent_manager, self.traffic_manager
+			self.stats_collector,
+			self.meter_manager,
+			self.agent_manager,
+			self.traffic_manager,
+			self.heuristic_manager,
 		)
 		start_api_server(host='0.0.0.0', port=8080)
 
