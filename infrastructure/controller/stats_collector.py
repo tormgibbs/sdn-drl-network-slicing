@@ -343,6 +343,21 @@ class StatsCollector:
 
 				self._request_stats()
 
+				fired = self._reply_event.wait(
+					timeout=min(_OFP_REPLY_WAIT_SEC, self._interval_sec * 0.2)
+				)
+				if not fired:
+					with self._cache_lock:
+						reply_count = self._reply_count
+
+					logger.warning(
+						'Stats collector: only %d/%d OFP replies received',
+						reply_count,
+						_EXPECTED_REPLIES,
+					)
+
+				self._run_probe_cycle()
+
 				elapsed = time.time() - cycle_start
 				remaining = self._interval_sec - elapsed
 				if remaining > 0:
