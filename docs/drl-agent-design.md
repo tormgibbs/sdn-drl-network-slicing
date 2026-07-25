@@ -76,22 +76,28 @@ R = w1·R_SLA − w2·P_latency − w3·P_loss − w4·P_oscillation + w5·R_uti
 
 This is a dense, proactive reward function designed to provide continuous gradient signals before SLA boundaries are breached, and to penalize unnecessary allocation oscillation.
 
+**Symbol convention:** `latency_i` and `loss_i` in this section are raw values (milliseconds, percent) — the same units as the SLA thresholds `L_i` and `Loss_i`. This is what makes `latency_i / L_i` dimensionally correct. Do not substitute the normalised observation values here.
+
 ### R_SLA — Dense SLA Satisfaction Reward
+
 R_SLA = Σ s_i × max(0, 1 − (latency_i / L_i)) × max(0, 1 − (loss_i / Loss_i))
 
 Provides a smooth, continuous reward that scales down as latency or loss approaches the SLA threshold, rather than a binary cliff.
 
 ### P_latency — Proactive Latency Penalty
+
 P_latency = Σ s_i × (latency_i / L_i)²
 
 A squared penalty that increases quadratically as latency approaches the limit. This provides a strong gradient signal to proactively reserve headroom before the hard SLA boundary is crossed.
 
 ### P_loss — Packet Loss Penalty
+
 P_loss = Σ s_i × (loss_i / Loss_i)
 
 Continuous weighted packet loss penalty, normalized by each slice's specific SLA threshold. A slice with a 0.1% loss SLA is penalized 10× more harshly than a slice with a 1% loss SLA for the same absolute loss percentage.
 
 ### P_oscillation — Allocation Stability Penalty
+
 P_oscillation = Σ |a_i(t) − a_i(t−1)| / C
 
 Penalizes large, unnecessary shifts in bandwidth allocation between consecutive steps. This prevents the agent from oscillating wildly and reduces control-plane overhead.
@@ -100,12 +106,25 @@ Penalizes large, unnecessary shifts in bandwidth allocation between consecutive 
 
 R_util = (1/n) × Σ min(throughput_i / a_i, 1.0)
 
-Measures delivery efficiency: how much of the allocated ceiling is being usefully consumed. 
+`throughput_i` is the delivered downlink throughput to the slice sink, measured as delta `tx_bytes` / elapsed time on the AP-facing port of s2/s3 (post-meter). `a_i` is the current meter ceiling applied to that slice in bps. The `min(..., 1.0)` clamp matches the observation builder's clamp on `utilisation_i`, ensuring the agent observes the same signal it is rewarded on.
+
+This measures delivery efficiency: how much of the allocated ceiling is being usefully consumed. A slice receiving 50 Mbps and delivering 48 Mbps contributes 0.96. A slice allocated 50 Mbps but delivering only 5 Mbps contributes 0.10, signalling wasted allocation.
+
+**Measurement point:** `throughput_i` is post-meter and therefore structurally bounded by `a_i`. The ratio is always in [0, 1] by construction. This is intentional — the formula measures delivery efficiency against the current ceiling, not against unconstrained demand.
+
+**Denominator safety:** `a_i ≥ floor_i > 0` is guaranteed by `project_allocation()`, called controller-side inside `meter_manager.install_meters()` on every /allocate request. The environment trusts the `rates_kbps` returned in /allocate's response as `a_i`. `_compute_reward()` and `_build_observation()` additionally assert `a_i > 0` before use, since this value crosses a network boundary — division by zero should be structurally impossible per the floor guarantee, but the assertion surfaces a violation loudly rather than allowing a bare ZeroDivisionError.
+
+**Signal behaviour under load:** R_util provides weak gradient signal when total demand is below capacity — all slices show high efficiency regardless of allocation. Learning is driven primarily by R_SLA, P_latency, and P_loss in this regime. R_util becomes the dominant differentiating signal when total demand approaches or exceeds C (registration spike, exam period scenarios). The curriculum training order reflects this.
+
+**Idle vs lossy disambiguation:** both an idle slice and a lossy-but-active slice produce low `throughput_i / a_i`. These are partially disambiguated by `loss_i` in the state vector: a lossy-but-active slice shows elevated ICMP probe loss; an idle slice shows near-zero loss. This disambiguation is imperfect — the probe uses ICMP through the GTP tunnel, not the iperf3 data path — so the agent learns the correlation empirically.
 
 ### P_fairness — Fairness Penalty
+
 P_fairness = 1 − (Σ (a_i/s_i))² / (n × Σ (a_i/s_i)²)
 
-Priority-weighted Jain's Fairness Index penalty. Ensures high-priority slices receive proportionally more bandwidth.
+Priority-weighted Jain's Fairness Index penalty. "Fair" means a_i/s_i is equal across slices — a high-priority slice receives proportionally more bandwidth. n = 5 slices.
+
+During spike scenarios, the expected agent behaviour is to disproportionately favour high-priority slices, which increases the spread of a_i/s_i and raises P_fairness. With w6 = 0.10 this effect is likely minor, but if VLE/Student Portal SLA satisfaction is suppressed during spike training, P_fairness interaction is the first diagnostic to check.
 
 ### Weights
 
@@ -118,10 +137,23 @@ Priority-weighted Jain's Fairness Index penalty. Ensures high-priority slices re
 | w5 | 0.10 | Utilisation reward |
 | w6 | 0.10 | Fairness penalty |
 
+Weights are hyperparameters tuned during training.
+
 ### Design Rationale
+
 This reward function is informed by recent research on proactive DRL resource allocation (2024–2025). The squared latency penalty approximates the risk-sensitive sigmoid penalty used in SafeSlice (Nagib et al., 2025), providing gradient signal before SLA boundaries are breached rather than reacting only after violations occur. The oscillation penalty addresses the stability concerns identified in hierarchical DRL frameworks (Hu et al., 2024). The dense SLA satisfaction term replaces the binary step-function approach, ensuring the agent receives continuous feedback even when operating well within SLA limits.
 
 **Future enhancement:** SafeSlice's sigmoid-based risk penalty `1/(1 + e^(-c1·(-l - (-c2))))` provides a theoretically more principled S-curve penalty bounded in [0,1], compared to the unbounded squared penalty used here. This is a candidate for future iteration if the squared penalty produces undesirable gradient behavior near SLA boundaries.
+
+## SLA Thresholds
+
+| Slice | Max Latency | Max Loss | Min Throughput | Priority (s_i) |
+|-------|-------------|----------|----------------|----------------|
+| VLE | 100 ms | 0.5% | 50 Mbps | 5 |
+| Student Portal | 50 ms | 0.1% | 25 Mbps | 4 |
+| Admin | 150 ms | 1% | 10 Mbps | 3 |
+| IoT | 200 ms | 5% | 64 Kbps | 2 |
+| General | 500 ms | 10% | 5 Mbps | 1 |
 
 ---
 
