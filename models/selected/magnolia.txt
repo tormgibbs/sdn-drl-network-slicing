@@ -1,0 +1,1 @@
+Source: models/linden/final.zip (timesteps=504000, dense reward per decision 014, beats ppo_slicing_480000 significantly, known non-blocking bias: vle->student_portal delta=0.03 win_rate=75%. PENDING live-network validation.)

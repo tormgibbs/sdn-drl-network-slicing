@@ -72,27 +72,35 @@ Sum of floors: 90064 kbps. Remainder for agent decisions: 9936 kbps.
 
 ## Reward Function
 
-R = w1·R_SLA − w2·P_latency − w3·P_loss + w4·R_util − w5·P_fairness
+R = w1·R_SLA − w2·P_latency − w3·P_loss − w4·P_oscillation + w5·R_util − w6·P_fairness
 
-**Symbol convention:** `latency_i` and `loss_i` in this section are raw values (milliseconds, percent) — the same units as the SLA thresholds `L_i` and `Loss_i`. This is what makes `(latency_i − L_i) / L_i` dimensionally correct. Do not substitute the normalised observation values here.
+This is a dense, proactive reward function designed to provide continuous gradient signals before SLA boundaries are breached, and to penalize unnecessary allocation oscillation.
 
-### R_SLA — SLA Satisfaction Reward
+**Symbol convention:** `latency_i` and `loss_i` in this section are raw values (milliseconds, percent) — the same units as the SLA thresholds `L_i` and `Loss_i`. This is what makes `latency_i / L_i` dimensionally correct. Do not substitute the normalised observation values here.
 
-R_SLA = Σ s_i × 𝟙(latency_i ≤ L_i AND loss_i ≤ Loss_i)
+### R_SLA — Dense SLA Satisfaction Reward
 
-Positive reward when both latency and loss are within SLA thresholds, weighted by slice priority s_i.
+R_SLA = Σ s_i × max(0, 1 − (latency_i / L_i)) × max(0, 1 − (loss_i / Loss_i))
 
-### P_latency — Latency Penalty
+Provides a smooth, continuous reward that scales down as latency or loss approaches the SLA threshold, rather than a binary cliff.
 
-P_latency = Σ s_i × max(0, (latency_i − L_i) / L_i)
+### P_latency — Proactive Latency Penalty
 
-Continuous penalty proportional to the degree of latency SLA violation.
+P_latency = Σ s_i × (latency_i / L_i)²
+
+A squared penalty that increases quadratically as latency approaches the limit. This provides a strong gradient signal to proactively reserve headroom before the hard SLA boundary is crossed.
 
 ### P_loss — Packet Loss Penalty
 
-P_loss = Σ s_i × loss_i
+P_loss = Σ s_i × (loss_i / Loss_i)
 
-Weighted packet loss penalty across all slices.
+Continuous weighted packet loss penalty, normalized by each slice's specific SLA threshold. A slice with a 0.1% loss SLA is penalized 10× more harshly than a slice with a 1% loss SLA for the same absolute loss percentage.
+
+### P_oscillation — Allocation Stability Penalty
+
+P_oscillation = Σ |a_i(t) − a_i(t−1)| / C
+
+Penalizes large, unnecessary shifts in bandwidth allocation between consecutive steps. This prevents the agent from oscillating wildly and reduces control-plane overhead.
 
 ### R_util — Resource Utilisation Reward
 
@@ -112,25 +120,30 @@ This measures delivery efficiency: how much of the allocated ceiling is being us
 
 ### P_fairness — Fairness Penalty
 
-P_fairness = 1 − (Σ a_i/s_i)² / (n × Σ (a_i/s_i)²)
+P_fairness = 1 − (Σ (a_i/s_i))² / (n × Σ (a_i/s_i)²)
 
 Priority-weighted Jain's Fairness Index penalty. "Fair" means a_i/s_i is equal across slices — a high-priority slice receives proportionally more bandwidth. n = 5 slices.
 
-During spike scenarios, the expected agent behaviour is to disproportionately favour high-priority slices, which increases the spread of a_i/s_i and raises P_fairness. With w5 = 0.10 this effect is likely minor, but if VLE/Student Portal SLA satisfaction is suppressed during spike training, P_fairness interaction is the first diagnostic to check.
+During spike scenarios, the expected agent behaviour is to disproportionately favour high-priority slices, which increases the spread of a_i/s_i and raises P_fairness. With w6 = 0.10 this effect is likely minor, but if VLE/Student Portal SLA satisfaction is suppressed during spike training, P_fairness interaction is the first diagnostic to check.
 
 ### Weights
 
 | Weight | Value | Role |
 |--------|-------|------|
-| w1 | 0.35 | SLA satisfaction bonus |
-| w2 | 0.25 | Latency penalty |
-| w3 | 0.20 | Packet loss penalty |
-| w4 | 0.10 | Utilisation reward |
-| w5 | 0.10 | Fairness penalty |
+| w1 | 0.30 | Dense SLA satisfaction bonus |
+| w2 | 0.25 | Proactive latency penalty (squared) |
+| w3 | 0.15 | Packet loss penalty |
+| w4 | 0.10 | Allocation oscillation penalty |
+| w5 | 0.10 | Utilisation reward |
+| w6 | 0.10 | Fairness penalty |
 
 Weights are hyperparameters tuned during training.
 
----
+### Design Rationale
+
+This reward function is informed by recent research on proactive DRL resource allocation (2024–2025). The squared latency penalty approximates the risk-sensitive sigmoid penalty used in SafeSlice (Nagib et al., 2025), providing gradient signal before SLA boundaries are breached rather than reacting only after violations occur. The oscillation penalty addresses the stability concerns identified in hierarchical DRL frameworks (Hu et al., 2024). The dense SLA satisfaction term replaces the binary step-function approach, ensuring the agent receives continuous feedback even when operating well within SLA limits.
+
+**Future enhancement:** SafeSlice's sigmoid-based risk penalty `1/(1 + e^(-c1·(-l - (-c2))))` provides a theoretically more principled S-curve penalty bounded in [0,1], compared to the unbounded squared penalty used here. This is a candidate for future iteration if the squared penalty produces undesirable gradient behavior near SLA boundaries.
 
 ## SLA Thresholds
 

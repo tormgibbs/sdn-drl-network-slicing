@@ -24,38 +24,52 @@ import yaml
 from stable_baselines3 import PPO
 
 from agent.project_allocation import project_allocation
-from agent.sim_env import _CONGESTION_THRESHOLD, W1, W2, W3, W4, W5, W6, SimCampusEnv
+from agent.sim_env import W1, W2, W3, W4, W5, W6, SimCampusEnv
 
 
-def full_reward(rates_kbps, metrics, slice_order, slices_cfg):
+def full_reward(rates_kbps, prev_rates_kbps, metrics, slice_order, slices_cfg, C_kbps):
 	n = len(slice_order)
-	r_sla = p_lat = p_loss = p_cong = r_util = 0.0
+	r_sla = p_lat = p_loss = p_osc = r_util = 0.0
 	fr = []
 	for name in slice_order:
 		m = metrics[name]
 		s = slices_cfg[name]
 		si, Li, Li_loss = s['priority'], s['max_latency_ms'], s['max_loss_pct']
-		p_lat += si * max(0.0, (m['latency_ms'] - Li) / Li)
-		sla_met = m['latency_ms'] <= Li and m['loss_pct'] <= Li_loss
-		r_sla += si * (1.0 if sla_met else 0.0)
-		p_loss += si * (m['loss_pct'] / 100.0)
+
+		latency_ratio = m['latency_ms'] / Li
+		p_lat += si * (latency_ratio**2)
+
+		loss_ratio = m['loss_pct'] / Li_loss
+		p_loss += si * loss_ratio
+
+		latency_sat = max(0.0, 1.0 - latency_ratio)
+		loss_sat = max(0.0, 1.0 - loss_ratio)
+		r_sla += si * (latency_sat * loss_sat)
+
 		ceil = rates_kbps[name] * 1000
 		util = min(m['tx_throughput_bps'] / ceil, 1.0) if ceil > 0 else 0.0
 		r_util += util
-		p_cong += si * max(0.0, util - _CONGESTION_THRESHOLD)
 		fr.append(rates_kbps[name] / si)
+
+		prev_rate = prev_rates_kbps[name]
+		change = abs(rates_kbps[name] - prev_rate) / C_kbps
+		p_osc += change
+
 	r_util /= n
 	sr, ssq = sum(fr), sum(x**2 for x in fr)
 	pf = 1.0 - (sr**2) / (n * ssq) if ssq > 0 else 0.0
-	return W1 * r_sla - W2 * p_lat - W3 * p_loss - W4 * p_cong + W5 * r_util - W6 * pf
+	return W1 * r_sla - W2 * p_lat - W3 * p_loss - W4 * p_osc + W5 * r_util - W6 * pf
 
 
 def make_counter(fracs, from_idx, to_idx, delta=0.10):
 	c = fracs.copy()
-	c[from_idx] = max(0.05, c[from_idx] - delta)
-	c[to_idx] = min(0.60, c[to_idx] + delta)
+	requested_from = c[from_idx] - delta
+	requested_to = c[to_idx] + delta
+	c[from_idx] = max(0.05, requested_from)
+	c[to_idx] = min(0.60, requested_to)
+	clipped = (c[from_idx] != requested_from) or (c[to_idx] != requested_to)
 	s = sum(c)
-	return [x / s for x in c]
+	return [x / s for x in c], clipped
 
 
 def parse_counters(pairs, slice_order):
@@ -104,13 +118,19 @@ def run_analysis(
 		rates_policy = dict(
 			zip(slice_order, project_allocation(fracs, floors_kbps, C_kbps))
 		)
-		r_policy = full_reward(rates_policy, metrics, slice_order, slices_cfg)
+
+		r_policy = full_reward(
+			rates_policy, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
+		)
 		found += 1
 
 		for name, (fi, ti) in counters.items():
-			cf = make_counter(fracs, fi, ti)
+			cf, _ = make_counter(fracs, fi, ti)
 			rates_c = dict(zip(slice_order, project_allocation(cf, floors_kbps, C_kbps)))
-			r_c = full_reward(rates_c, metrics, slice_order, slices_cfg)
+
+			r_c = full_reward(
+				rates_c, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
+			)
 			counter_deltas[name].append(r_c - r_policy)
 			if r_c > r_policy:
 				counter_wins[name] += 1
@@ -119,11 +139,12 @@ def run_analysis(
 	fi, ti = (
 		counters.get(sweep_key) or parse_counters([sweep_counter], slice_order)[sweep_key]
 	)
+	sweep_seeds = list(range(sweep_episodes))
 	sweep_results = []
 	for delta in sweep_sizes:
-		wins, deltas = 0, []
-		for _ in range(sweep_episodes):
-			obs, _ = env.reset()
+		wins, deltas, clips = 0, [], 0
+		for seed in sweep_seeds:
+			obs, _ = env.reset(seed=seed)
 			metrics = env._last_metrics
 			action, _ = model.predict(obs, deterministic=True)
 			exp = np.exp(action)
@@ -131,15 +152,24 @@ def run_analysis(
 			rates_policy = dict(
 				zip(slice_order, project_allocation(fracs, floors_kbps, C_kbps))
 			)
-			r_policy = full_reward(rates_policy, metrics, slice_order, slices_cfg)
-			cf = make_counter(fracs, fi, ti, delta=delta)
+
+			r_policy = full_reward(
+				rates_policy, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
+			)
+			cf, clipped = make_counter(fracs, fi, ti, delta=delta)
+			if clipped:
+				clips += 1
 			rates_c = dict(zip(slice_order, project_allocation(cf, floors_kbps, C_kbps)))
-			r_c = full_reward(rates_c, metrics, slice_order, slices_cfg)
+			r_c = full_reward(
+				rates_c, env._current_rates_kbps, metrics, slice_order, slices_cfg, C_kbps
+			)
 			deltas.append(r_c - r_policy)
 			if r_c > r_policy:
 				wins += 1
 		d = np.array(deltas)
-		sweep_results.append((delta, wins / len(deltas), d.mean()))
+		sweep_results.append(
+			(delta, wins / len(deltas), d.mean(), clips / len(sweep_seeds))
+		)
 
 	return {
 		'found': found,
@@ -228,12 +258,11 @@ def main() -> None:
 			)
 
 		print(f'\n=== {res["sweep_counter"]} step-size sweep ===')
-		print(f'{"delta":<10} {"win_rate":<12} {"mean_delta"}')
-		print('-' * 35)
-		for delta, win_rate, mean_delta in res['sweep_results']:
-			print(f'{delta:<10} {win_rate:<12.1%} {mean_delta:.5f}')
+		print(f'{"delta":<10} {"win_rate":<12} {"mean_delta":<14} {"clip_rate"}')
+		print('-' * 45)
+		for delta, win_rate, mean_delta, clip_rate in res['sweep_results']:
+			print(f'{delta:<10} {win_rate:<12.1%} {mean_delta:<14.5f} {clip_rate:.1%}')
 
-	# Cross-model trend summary for the sweep counter, easy to eyeball together
 	if len(all_results) > 1:
 		print(
 			f'\n{"=" * 70}\nTREND SUMMARY: {args.sweep_counter} win_rate by delta, across models\n{"=" * 70}'

@@ -1,4 +1,3 @@
-# agent/sim_env.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,11 +9,13 @@ from gymnasium import spaces
 
 from agent.project_allocation import project_allocation, validate_floors
 
-_CONGESTION_THRESHOLD = 0.85
-
 _TRAFFIC_CONFIG_PATH = Path('config/traffic.yaml')
 
-W1, W2, W3, W4, W5, W6 = 0.35, 0.15, 0.20, 0.10, 0.10, 0.10
+W1, W2, W3, W4, W5, W6 = 0.30, 0.25, 0.15, 0.10, 0.10, 0.10
+
+_TCP_MSS_BYTES = 1460
+_TCP_LOSS_PCT_FLOOR = 1e-4
+_TCP_LOSS_PCT_CAP = 1.0
 
 
 def _load_scenarios_and_profiles() -> tuple[dict, dict]:
@@ -40,26 +41,22 @@ def _load_scenarios_and_profiles() -> tuple[dict, dict]:
 				'pattern': 'mixed',
 				'mean_on': p['mean_on_sec'],
 				'mean_off': p['mean_off_sec'],
+				'protocol': p['protocol'],
 			}
 		else:
 			profiles[name] = {
 				'target_bps': p['target_bps'],
 				'pattern': 'continuous',
+				'protocol': p['protocol'],
 			}
 
 	return scenarios, profiles
 
 
-# dl key present for structural consistency with traffic.yaml; _offered_bps uses ul only.
 _SCENARIOS, _TRAFFIC_PROFILES = _load_scenarios_and_profiles()
 
 
 class SimCampusEnv(gym.Env):
-	"""Fast simulation of CampusSlicingEnv for rapid policy training.
-	Mirrors observation space, action space, and reward function exactly.
-	No network calls; demand and loss computed analytically.
-	"""
-
 	metadata = {'render_modes': []}
 
 	def __init__(self, slices_cfg: dict, episode_length: int = 100) -> None:
@@ -91,6 +88,7 @@ class SimCampusEnv(gym.Env):
 		)
 
 		self._current_rates_kbps: dict[str, int] = {}
+		self._prev_rates_kbps: dict[str, int] = {}
 		self._step_count = 0
 		self._on_off_state: dict[str, bool] = {}
 		self._on_off_timer: dict[str, float] = {}
@@ -111,7 +109,6 @@ class SimCampusEnv(gym.Env):
 			if profile['pattern'] == 'mixed':
 				self._on_off_state[name] = False
 				self._on_off_timer[name] = self.np_random.exponential(profile['mean_off'])
-			# Baseline one-way latency — emulates GTP tunnel + OVS pipeline overhead
 			self._base_latency_ms[name] = self.np_random.uniform(5.0, 20.0)
 
 	def _offered_bps(self, name: str) -> float:
@@ -141,6 +138,12 @@ class SimCampusEnv(gym.Env):
 
 		return continuous + burst
 
+	def _tcp_congested_loss_pct(self, name: str, ceiling_bps: float) -> float:
+		rtt_sec = max(self._base_latency_ms[name], 1.0) * 2 / 1000.0
+		mss_bits = _TCP_MSS_BYTES * 8
+		p = (mss_bits / (rtt_sec * ceiling_bps)) ** 2
+		return min(max(p * 100.0, _TCP_LOSS_PCT_FLOOR), _TCP_LOSS_PCT_CAP)
+
 	def _compute_metrics(self) -> dict[str, dict]:
 		metrics = {}
 		for name in self.slice_order:
@@ -151,7 +154,10 @@ class SimCampusEnv(gym.Env):
 				loss_pct = 0.0
 				utilisation = 0.0
 			elif offered > ceiling_bps:
-				loss_pct = min(100.0 * (offered - ceiling_bps) / offered, 100.0)
+				if _TRAFFIC_PROFILES[name]['protocol'] == 'tcp':
+					loss_pct = self._tcp_congested_loss_pct(name, ceiling_bps)
+				else:
+					loss_pct = min(100.0 * (offered - ceiling_bps) / offered, 100.0)
 				utilisation = 1.0
 			else:
 				loss_pct = 0.0
@@ -187,9 +193,9 @@ class SimCampusEnv(gym.Env):
 		r_sla = 0.0
 		p_latency = 0.0
 		p_loss = 0.0
-		p_congestion = 0.0
 		r_util_sum = 0.0
 		fairness_ratios = []
+		p_oscillation = 0.0
 
 		for name in self.slice_order:
 			m = metrics[name]
@@ -199,18 +205,27 @@ class SimCampusEnv(gym.Env):
 			Loss_i = cfg['max_loss_pct']
 			loss_i = m['loss_pct']
 
-			latency_ms_ok = m['latency_ms'] <= Li
-			p_latency += si * max(0.0, (m['latency_ms'] - Li) / Li)
+			latency_ratio = m['latency_ms'] / Li
+			p_latency += si * (latency_ratio**2)
 
-			sla_met = latency_ms_ok and loss_i <= Loss_i
-			r_sla += si * (1.0 if sla_met else 0.0)
-			p_loss += si * (loss_i / 100.0)
+			loss_ratio = loss_i / Loss_i
+			p_loss += si * loss_ratio
+
+			latency_sat = max(0.0, 1.0 - latency_ratio)
+			loss_sat = max(0.0, 1.0 - loss_ratio)
+			r_sla += si * (latency_sat * loss_sat)
 
 			ceiling_bps = self._current_rates_kbps[name] * 1000
 			util = min(m['tx_throughput_bps'] / ceiling_bps, 1.0) if ceiling_bps > 0 else 0.0
 			r_util_sum += util
-			p_congestion += si * max(0.0, util - _CONGESTION_THRESHOLD)
 			fairness_ratios.append(self._current_rates_kbps[name] / si)
+
+			current_rate = self._current_rates_kbps[name]
+			prev_rate = self._prev_rates_kbps[name]
+			change = abs(current_rate - prev_rate) / self._C_kbps
+			p_oscillation += change
+
+		self._prev_rates_kbps = dict(self._current_rates_kbps)
 
 		r_util = r_util_sum / n_active
 		sum_ratios = sum(fairness_ratios)
@@ -221,7 +236,7 @@ class SimCampusEnv(gym.Env):
 			W1 * r_sla
 			- W2 * p_latency
 			- W3 * p_loss
-			- W4 * p_congestion
+			- W4 * p_oscillation
 			+ W5 * r_util
 			- W6 * p_fairness
 		)
@@ -238,6 +253,7 @@ class SimCampusEnv(gym.Env):
 				project_allocation(equal_frac, self._floors_kbps, self._C_kbps),
 			)
 		)
+		self._prev_rates_kbps = dict(self._current_rates_kbps)
 
 		metrics = self._compute_metrics()
 		return self._build_observation(metrics), {}

@@ -74,6 +74,9 @@ controller:
   host: 127.0.0.1
   port: 6633
   stats_interval_sec: 2
+  barrier_timeout_sec: 5.0
+  barrier_warn_interval_sec: 30.0
+  meter_settle_sec: 0.5
 
 upf:
   eth0_mac: "02:00:00:00:00:ff"

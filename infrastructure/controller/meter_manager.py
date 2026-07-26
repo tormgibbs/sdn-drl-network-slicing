@@ -1,9 +1,12 @@
 # infrastructure/controller/meter_manager.py
 
 import logging
+import threading
+import time
 from pathlib import Path
 
 import yaml
+from os_ken.lib import hub
 
 from agent.project_allocation import project_allocation, validate_floors
 
@@ -34,7 +37,14 @@ class MeterManager:
 		self._topology_config = topology_config
 		self._slices_config = slices_config
 		self._datapaths: dict[str, object] = {}
+		self._installed_meter_ids: set[tuple[str, int]] = set()
+		self._meter_query_events: dict[str, threading.Event] = {}
+		self._meter_query_done: set[str] = set()
 		self._current_allocations: dict[str, float] = {}
+		self._pending_barriers: dict[int, str] = {}
+		self._change_confirmed_time: float = 0.0
+		self._pending_since: float = 0.0
+		self._last_pending_warning: float = 0.0
 		self._initialized = False
 		slices = self._load_slices()
 		self.slice_order: list[str] = slices['slice_order']
@@ -53,22 +63,64 @@ class MeterManager:
 		)
 		return data
 
+	def _query_existing_meters(self, switch_name: str, datapath: object) -> None:
+		"""Controller restarts reset in-memory state but not OVS
+		so meters must be discovered, not assumed empty."""
+		ofp = datapath.ofproto
+		ofp_parser = datapath.ofproto_parser
+		event = threading.Event()
+		self._meter_query_events[switch_name] = event
+
+		req = ofp_parser.OFPMeterConfigStatsRequest(datapath, 0, ofp.OFPM_ALL)
+		datapath.send_msg(req)
+
+		if not event.wait(timeout=3.0):
+			logger.warning(
+				'Meter config query timed out for %s -- assuming no existing meters',
+				switch_name,
+			)
+
+	def handle_meter_config_reply(self, switch_name: str, body: list) -> None:
+		for meter in body:
+			self._installed_meter_ids.add((switch_name, meter.meter_id))
+		self._meter_query_done.add(switch_name)
+		event = self._meter_query_events.pop(switch_name, None)
+		if event is not None:
+			event.set()
+		logger.info(
+			'Existing meters discovered on %s: %s',
+			switch_name,
+			[m.meter_id for m in body],
+		)
+		self._maybe_install_default_meters()
+
+	def _maybe_install_default_meters(self) -> None:
+		if not self._initialized and _AGGREGATION_SWITCHES.issubset(self._meter_query_done):
+			logger.info('All meter queries complete -- installing default meters')
+			self._install_default_meters()
+			self._initialized = True
+
 	def register_datapath(self, switch_name: str, datapath: object) -> None:
 		self._datapaths[switch_name] = datapath
 		logger.info('Datapath registered: %s', switch_name)
 
+		if switch_name in _AGGREGATION_SWITCHES:
+			hub.spawn(self._query_existing_meters, switch_name, datapath)
+
 		if not _AGGREGATION_SWITCHES.issubset(self._datapaths.keys()):
 			return
 
-		if not self._initialized:
-			logger.info('All aggregation switches registered -- installing default meters')
-			self._install_default_meters()
-			self._initialized = True
-		else:
+		if self._initialized:
 			logger.warning(
 				'Aggregation switch reconnected: %s -- re-applying current allocations',
 				switch_name,
 			)
+
+			self._installed_meter_ids = {
+				(sw, mid) for (sw, mid) in self._installed_meter_ids if sw != switch_name
+			}
+			self._meter_query_done.discard(switch_name)
+
 			slices = self._load_slices()
 			self._install_meters_for_switch(
 				switch_name,
@@ -118,10 +170,76 @@ class MeterManager:
 
 		rates_kbps = self._compute_rates_kbps(allocations, slices)
 
+		# Superseded by this call. Any barrier replies still in flight for a
+		# prior allocation must not be mistaken for confirmation of this one.
+		self._pending_barriers.clear()
+
 		for switch_name in aggregation_ports:
 			self._install_meters_for_switch(switch_name, rates_kbps, topology, slices)
+			datapath = self._datapaths.get(switch_name)
+			if datapath is None:
+				continue
+			ofp_parser = datapath.ofproto_parser
+			barrier = ofp_parser.OFPBarrierRequest(datapath)
+			datapath.send_msg(barrier)
+			self._pending_barriers[barrier.xid] = switch_name
+
+		if not self._pending_barriers:
+			# No datapaths were available to barrier against. Treat as
+			# confirmed immediately rather than waiting on nothing.
+			self._change_confirmed_time = time.time()
 
 		return rates_kbps
+
+	def handle_barrier_reply(self, xid: int) -> None:
+		switch_name = self._pending_barriers.pop(xid, None)
+		if switch_name is None:
+			return  # unknown or already-superseded xid
+		if not self._pending_barriers:
+			self._change_confirmed_time = time.time()
+			logger.info(
+				'Allocation change confirmed via barrier at %.6f', self._change_confirmed_time
+			)
+
+	def handle_datapath_disconnect(self, switch_name: str) -> None:
+		# A disconnected switch can never send its barrier reply. Waiting
+		# for one that will never arrive would wedge the collector forever.
+		gone_xids = [x for x, sw in self._pending_barriers.items() if sw == switch_name]
+
+		for xid in gone_xids:
+			del self._pending_barriers[xid]
+
+		if gone_xids and not self._pending_barriers:
+			self._change_confirmed_time = time.time()
+			logger.warning(
+				'Barrier for %s abandoned -- switch disconnected before reply', switch_name
+			)
+
+	def check_barrier_watchdog(self) -> None:
+		"""Logs, but never confirms. A stuck barrier must be fixed by a
+		disconnect event or a fresh allocation, not by this check timing out."""
+		if not self._pending_barriers:
+			return
+
+		topology = self._load_topology()
+		controller_cfg = topology['controller']
+		timeout_sec = controller_cfg.get('barrier_timeout_sec', 5.0)
+		warn_interval_sec = controller_cfg.get('barrier_warn_interval_sec', 30.0)
+
+		now = time.time()
+		if now - self._pending_since < timeout_sec:
+			return
+		if now - self._last_pending_warning < warn_interval_sec:
+			return
+		self._last_pending_warning = now
+		logger.warning(
+			'Barrier still pending after %.1fs for switches: %s',
+			now - self._pending_since,
+			sorted(set(self._pending_barriers.values())),
+		)
+
+	def get_change_confirmed_time(self) -> float:
+		return self._change_confirmed_time
 
 	def _install_meters_for_switch(
 		self,
@@ -168,7 +286,7 @@ class MeterManager:
 
 			meter_id = _METER_ID_BY_AP[ap_name]
 
-			self._replace_meter(datapath, meter_id, rate_kbps)
+			self._replace_meter(datapath, switch_name, meter_id, rate_kbps)
 			self._install_meter_flow(datapath, meter_id, vlan_id, ap_port_no, core_port)
 
 			if vlan_id not in metered_vlans:
@@ -184,42 +302,31 @@ class MeterManager:
 				rate_kbps,
 			)
 
-	def _replace_meter(self, datapath: object, meter_id: int, rate_kbps: int) -> None:
-		"""
-		Replace an OpenFlow meter. rate_kbps must already be a final,
-		floor-respecting rate -- this function does not clamp or convert units.
-		"""
+	def _replace_meter(
+		self, datapath: object, switch_name: str, meter_id: int, rate_kbps: int
+	) -> None:
+		"""Modifies rate in place; avoids the delete/add gap where meter_id briefly doesn't exist."""
 		ofp = datapath.ofproto
 		ofp_parser = datapath.ofproto_parser
-
-		# OFPMC_MODIFY silently fails on OVS when the meter does not exist yet.
-		# Delete unconditionally before adding to guarantee consistent state.
-		datapath.send_msg(
-			ofp_parser.OFPMeterMod(
-				datapath=datapath,
-				command=ofp.OFPMC_DELETE,
-				flags=ofp.OFPMF_KBPS,
-				meter_id=meter_id,
-				bands=[],
-			)
-		)
-
 		rate_kbps = max(1, rate_kbps)
+		key = (switch_name, meter_id)
+
+		command = ofp.OFPMC_MODIFY if key in self._installed_meter_ids else ofp.OFPMC_ADD
+
 		datapath.send_msg(
 			ofp_parser.OFPMeterMod(
 				datapath=datapath,
-				command=ofp.OFPMC_ADD,
+				command=command,
 				flags=ofp.OFPMF_KBPS,
 				meter_id=meter_id,
 				bands=[
 					ofp_parser.OFPMeterBandDrop(
-						type_=ofp.OFPMBT_DROP,
-						rate=rate_kbps,
-						burst_size=0,
+						type_=ofp.OFPMBT_DROP, rate=rate_kbps, burst_size=0
 					)
 				],
 			)
 		)
+		self._installed_meter_ids.add(key)
 
 	def _install_meter_flow(
 		self, datapath: object, meter_id: int, vlan_id: int, in_port: int, out_port: int

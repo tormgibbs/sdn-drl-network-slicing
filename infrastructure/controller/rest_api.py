@@ -24,12 +24,18 @@ class _Registry:
 		self._meter_manager = None
 		self._agent_manager = None
 		self._traffic_manager = None
+		self._heuristic_manager = None
 		self._frozen = False
 		self.loop = None
 		self.ws_clients = set()
 
 	def register(
-		self, stats_collector, meter_manager, agent_manager, traffic_manager
+		self,
+		stats_collector,
+		meter_manager,
+		agent_manager,
+		traffic_manager,
+		heuristic_manager,
 	) -> None:
 		if self._frozen:
 			raise RuntimeError('Registry is already frozen')
@@ -37,6 +43,7 @@ class _Registry:
 		self._meter_manager = meter_manager
 		self._agent_manager = agent_manager
 		self._traffic_manager = traffic_manager
+		self._heuristic_manager = heuristic_manager
 		self._frozen = True
 
 	def reset(self) -> None:
@@ -44,7 +51,12 @@ class _Registry:
 		self._meter_manager = None
 		self._agent_manager = None
 		self._traffic_manager = None
+		self._heuristic_manager = None
 		self._frozen = False
+
+	@property
+	def heuristic_manager(self):
+		return self._heuristic_manager
 
 	@property
 	def stats_collector(self):
@@ -226,6 +238,34 @@ def agent_control(body: dict):
 		raise HTTPException(status_code=422, detail=f'Unknown action: {action!r}')
 
 	return am.status()
+
+
+@app.get('/heuristic/state')
+def heuristic_state():
+	hm = registry.heuristic_manager
+	if hm is None:
+		raise HTTPException(status_code=503, detail='Heuristic manager not available')
+	return hm.status()
+
+
+@app.post('/heuristic/control')
+def heuristic_control(body: dict):
+	hm = registry.heuristic_manager
+	if hm is None:
+		raise HTTPException(status_code=503, detail='Heuristic manager not available')
+
+	action = body.get('action')
+	if action == 'start':
+		try:
+			hm.start()
+		except RuntimeError as exc:
+			raise HTTPException(status_code=409, detail=str(exc)) from exc
+	elif action == 'stop':
+		hm.stop()
+	else:
+		raise HTTPException(status_code=422, detail=f'Unknown action: {action!r}')
+
+	return hm.status()
 
 
 @app.get('/traffic/state')

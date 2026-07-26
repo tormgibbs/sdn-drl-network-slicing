@@ -11,7 +11,12 @@ import os
 import yaml
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
-from os_ken.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
+from os_ken.controller.handler import (
+	CONFIG_DISPATCHER,
+	DEAD_DISPATCHER,
+	MAIN_DISPATCHER,
+	set_ev_cls,
+)
 from os_ken.ofproto import ofproto_v1_3
 
 from infrastructure.controller.agent_manager import AgentManager
@@ -30,6 +35,7 @@ from infrastructure.controller.flow_manager import (
 	set_ap_vlan_map,
 	set_dpid_map,
 )
+from infrastructure.controller.heuristic_manager import HeuristicManager
 from infrastructure.controller.meter_manager import MeterManager
 from infrastructure.controller.rest_api import registry, start_api_server
 from infrastructure.controller.stats_collector import StatsCollector
@@ -76,9 +82,14 @@ class CampusController(app_manager.OSKenApp):
 		self.stats_collector = StatsCollector(interval_sec=load_stats_interval())
 		self.agent_manager = AgentManager()
 		self.traffic_manager = TrafficManager()
+		self.heuristic_manager = HeuristicManager()
 		self.stats_collector.start()
 		registry.register(
-			self.stats_collector, self.meter_manager, self.agent_manager, self.traffic_manager
+			self.stats_collector,
+			self.meter_manager,
+			self.agent_manager,
+			self.traffic_manager,
+			self.heuristic_manager,
 		)
 		start_api_server(host='0.0.0.0', port=8080)
 
@@ -120,6 +131,27 @@ class CampusController(app_manager.OSKenApp):
 		name = self.dpid_to_name.get(dpid, '')
 		if name in ('s2', 's3'):
 			self.stats_collector.handle_port_stats_reply(name, ev.msg.body)
+
+	@set_ev_cls(
+		ofp_event.EventOFPMeterConfigStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
+	)
+	def meter_config_reply_handler(self, ev):
+		datapath = ev.msg.datapath
+		dpid = datapath.id
+		name = self.dpid_to_name.get(dpid, '')
+		if name in ('s2', 's3'):
+			self.meter_manager.handle_meter_config_reply(name, ev.msg.body)
+
+	@set_ev_cls(ofp_event.EventOFPBarrierReply, MAIN_DISPATCHER)
+	def barrier_reply_handler(self, ev):
+		self.meter_manager.handle_barrier_reply(ev.msg.xid)
+
+	@set_ev_cls(ofp_event.EventOFPStateChange, DEAD_DISPATCHER)
+	def datapath_dead_handler(self, ev):
+		datapath = ev.datapath
+		name = self.dpid_to_name.get(datapath.id, '')
+		if name in ('s2', 's3'):
+			self.meter_manager.handle_datapath_disconnect(name)
 
 	@set_ev_cls(
 		ofp_event.EventOFPPortDescStatsReply, [CONFIG_DISPATCHER, MAIN_DISPATCHER]
