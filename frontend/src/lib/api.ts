@@ -43,7 +43,7 @@ export async function postTrafficScenario(body: TrafficScenarioRequest) {
     body: JSON.stringify(parsedBody),
   });
   if (!res.ok) throw new Error(`scenario switch failed: ${res.status}`);
-  return res.json();
+  return TrafficStatusSchema.parse(await res.json());
 }
 
 // GET /traffic/state — same {running, last_loop} shape as postTrafficScenario's

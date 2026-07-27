@@ -1,11 +1,18 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Line, LineChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { generateHistory, initialData } from "#/data/dashboard";
-import type { MockDashboardSnapshot } from "#/data/dashboard";
+import { initialData } from "#/data/dashboard";
+import type { SliceMetricPoint } from "#/stores/live-metrics-store";
+import type { SliceKey } from "#/types/slice";
 
-const TIME_RANGE_POINTS = { "1M": 12, "5M": 60, "15M": 180 };
+// How many of the most recent real ticks to show per range. Real data
+// arrives at whatever cadence the backend broadcasts (not a fixed interval
+// we control), so these are point-counts, not literal minutes — kept as a
+// familiar mapping to the old "1M/5M/15M" labels rather than inventing new
+// UI, but the underlying meaning has changed from "N minutes of mock data"
+// to "N most recent real points, capped by history buffer size".
+const TIME_RANGE_POINTS = { "1M": 12, "5M": 60, "15M": 100 };
 
-const SLICE_LINES = [
+const SLICE_LINES: { key: SliceKey; stroke: string }[] = [
   { key: "vle", stroke: "#3b82f6" },
   { key: "student_portal", stroke: "#22c55e" },
   { key: "admin", stroke: "#f97316" },
@@ -28,40 +35,51 @@ const CustomTooltip = ({ active, payload }: any) => {
 };
 
 type PerformanceChartsProps = {
-  dynamicData: MockDashboardSnapshot;
+  // Real per-slice rolling history from the live store — no fabricated
+  // trailing data. Each array is empty until WS ticks start arriving, in
+  // which case the chart renders with no lines rather than a mock trend.
+  metricsHistory: Record<SliceKey, SliceMetricPoint[]>;
   totalAggregate: number;
-  breachedSlice: keyof typeof initialData.slices | undefined;
+  breachedSlice: SliceKey | undefined;
 };
 
 export function PerformanceCharts({
-  dynamicData,
+  metricsHistory,
   totalAggregate,
   breachedSlice,
 }: PerformanceChartsProps) {
   const [timeRange, setTimeRange] = useState<"1M" | "5M" | "15M">("1M");
+  const pointCount = TIME_RANGE_POINTS[timeRange];
 
-  const history = useMemo(
-    () => generateHistory(dynamicData, TIME_RANGE_POINTS[timeRange]),
-    [dynamicData, timeRange],
+  // All five slices' history arrays grow in lockstep (setMetrics appends to
+  // every slice on every tick), so they're always the same length — safe to
+  // zip by index rather than needing to align on timestamp.
+  const pointsAvailable = metricsHistory.vle.length;
+  const sliceStart = Math.max(0, pointsAvailable - pointCount);
+
+  const throughputData = Array.from(
+    { length: pointsAvailable - sliceStart },
+    (_, i) => {
+      const idx = sliceStart + i;
+      const row: Record<string, number> = { time: i };
+      for (const { key } of SLICE_LINES) {
+        row[key] = metricsHistory[key][idx].tx_throughput_bps / 1_000_000;
+      }
+      return row;
+    },
   );
 
-  const throughputData = history.map((snap, i) => ({
-    time: i,
-    vle: snap.metrics.vle.tx_throughput_bps / 1_000_000,
-    student_portal: snap.metrics.student_portal.tx_throughput_bps / 1_000_000,
-    admin: snap.metrics.admin.tx_throughput_bps / 1_000_000,
-    iot: snap.metrics.iot.tx_throughput_bps / 1_000_000,
-    general: snap.metrics.general.tx_throughput_bps / 1_000_000,
-  }));
-
-  const latencyData = history.map((snap, i) => ({
-    time: i,
-    vle: snap.metrics.vle.latency_ms,
-    student_portal: snap.metrics.student_portal.latency_ms,
-    admin: snap.metrics.admin.latency_ms,
-    iot: snap.metrics.iot.latency_ms,
-    general: snap.metrics.general.latency_ms,
-  }));
+  const latencyData = Array.from(
+    { length: pointsAvailable - sliceStart },
+    (_, i) => {
+      const idx = sliceStart + i;
+      const row: Record<string, number> = { time: i };
+      for (const { key } of SLICE_LINES) {
+        row[key] = metricsHistory[key][idx].latency_ms;
+      }
+      return row;
+    },
+  );
 
   return (
     <div className="mt-6">
@@ -93,24 +111,30 @@ export function PerformanceCharts({
               {totalAggregate.toFixed(1)} Mbps
             </p>
           </div>
-          <ResponsiveContainer width={"100%"} height={200}>
-            <LineChart data={throughputData}>
-              <XAxis dataKey="time" hide />
-              <YAxis hide />
-              <Tooltip content={<CustomTooltip />} cursor={false} />
-              {SLICE_LINES.map((s) => (
-                <Line
-                  key={s.key}
-                  type="monotone"
-                  dataKey={s.key}
-                  stroke={s.stroke}
-                  dot={true}
-                  activeDot={false}
-                  strokeWidth={2}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
+          {throughputData.length === 0 ? (
+            <div className="h-[200px] flex items-center justify-center text-xs text-muted-foreground uppercase tracking-widest">
+              No data yet
+            </div>
+          ) : (
+            <ResponsiveContainer width={"100%"} height={200}>
+              <LineChart data={throughputData}>
+                <XAxis dataKey="time" hide />
+                <YAxis hide />
+                <Tooltip content={<CustomTooltip />} cursor={false} />
+                {SLICE_LINES.map((s) => (
+                  <Line
+                    key={s.key}
+                    type="monotone"
+                    dataKey={s.key}
+                    stroke={s.stroke}
+                    dot={true}
+                    activeDot={false}
+                    strokeWidth={2}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Latency Per Slice */}
@@ -125,24 +149,30 @@ export function PerformanceCharts({
               </p>
             )}
           </div>
-          <ResponsiveContainer width={"100%"} height={200}>
-            <LineChart data={latencyData}>
-              <XAxis dataKey="time" hide />
-              <YAxis hide />
-              <Tooltip content={<CustomTooltip />} cursor={false} />
-              {SLICE_LINES.map((s) => (
-                <Line
-                  key={s.key}
-                  type="monotone"
-                  dataKey={s.key}
-                  stroke={s.stroke}
-                  activeDot={false}
-                  dot={true}
-                  strokeWidth={2}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
+          {latencyData.length === 0 ? (
+            <div className="h-[200px] flex items-center justify-center text-xs text-muted-foreground uppercase tracking-widest">
+              No data yet
+            </div>
+          ) : (
+            <ResponsiveContainer width={"100%"} height={200}>
+              <LineChart data={latencyData}>
+                <XAxis dataKey="time" hide />
+                <YAxis hide />
+                <Tooltip content={<CustomTooltip />} cursor={false} />
+                {SLICE_LINES.map((s) => (
+                  <Line
+                    key={s.key}
+                    type="monotone"
+                    dataKey={s.key}
+                    stroke={s.stroke}
+                    activeDot={false}
+                    dot={true}
+                    strokeWidth={2}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </div>

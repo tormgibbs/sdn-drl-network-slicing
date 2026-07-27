@@ -4,9 +4,22 @@ import { SliceTooltip } from "../components/primitives/SliceTooltip";
 import { ChartPanel } from "../components/primitives/slice-dashboard/chartpanel";
 import { useLiveSliceData, type SliceSLA } from "#/hooks/use-live-slice-data";
 import { useReportSla } from "#/hooks/use-reportsla";
+import { initialData } from "#/data/dashboard";
+import { formatBps } from "#/lib/format";
 import type { SliceSharedProps } from "../types/sliceShared";
 
-const IOT_SLA: SliceSLA = { minThrpt: 64_000, maxLat: 200, maxLoss: 5.0 };
+// Sourced from initialData.slices.iot — the single place SLA thresholds are
+// defined, kept in sync with config/slices.yaml. This value already
+// happened to match slices.yaml before this change (64_000), so this isn't
+// fixing an active bug — it's closing the same future-drift risk that let
+// the other four slices' hardcoded constants go stale silently. Do not
+// hardcode values here again — if slices.yaml changes, update dashboard.ts
+// and this reads the new value automatically.
+const IOT_SLA: SliceSLA = {
+  minThrpt: initialData.slices.iot.min_throughput_bps,
+  maxLat: initialData.slices.iot.max_latency_ms,
+  maxLoss: initialData.slices.iot.max_loss_pct,
+};
 
 export function IoTSlice({
   switcherTabs,
@@ -72,7 +85,7 @@ export function IoTSlice({
               `${current.loss_pct.toFixed(2)}%`,
             ]
           : ["— Kbps", "—ms", "—%"],
-        slaTargets: "64 Kbps min\u00a0·\u00a0200ms max\u00a0·\u00a05% max",
+        slaTargets: `${formatBps(IOT_SLA.minThrpt)} min\u00a0·\u00a0${IOT_SLA.maxLat}ms max\u00a0·\u00a0${IOT_SLA.maxLoss}% max`,
       }}
       right={{
         currentState: [
@@ -86,9 +99,9 @@ export function IoTSlice({
           },
         ],
         slaThresholds: [
-          { label: "MIN THRPT", value: "64 Kbps" },
-          { label: "MAX LAT", value: "200ms" },
-          { label: "MAX LOSS", value: "5%" },
+          { label: "MIN THRPT", value: formatBps(IOT_SLA.minThrpt) },
+          { label: "MAX LAT", value: `${IOT_SLA.maxLat}ms` },
+          { label: "MAX LOSS", value: `${IOT_SLA.maxLoss}%` },
           { label: "PRIORITY", value: "P2 (Low)", highlight: true },
         ],
         recentCycles,
@@ -109,7 +122,7 @@ export function IoTSlice({
           <YAxis domain={[0, 250]} tickCount={5} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={200}
+            y={IOT_SLA.maxLat}
             stroke="#FB2C36"
             strokeDasharray="4 3"
             label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#FB2C36", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
@@ -131,7 +144,7 @@ export function IoTSlice({
           <YAxis domain={[0, 6]} tickCount={4} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={5.0}
+            y={IOT_SLA.maxLoss}
             stroke="#EAB308"
             strokeDasharray="4 3"
             label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#EAB308", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}

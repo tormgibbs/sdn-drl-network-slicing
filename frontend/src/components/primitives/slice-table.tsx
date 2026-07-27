@@ -8,15 +8,19 @@ import {
 } from "#/components/ui/table";
 import { Progress } from "#/components/ui/progress";
 import { initialData } from "#/data/dashboard";
-import type { MockDashboardSnapshot } from "#/data/dashboard";
+import type { MetricsResponse } from "#/lib/schemas";
+import type { SliceKey } from "#/types/slice";
 import { computeSlaStatus } from "#/lib/sla";
 
 type SliceTableProps = {
-  dynamicData: MockDashboardSnapshot;
+  // Live metrics only — null until the first WS tick arrives, in which
+  // case every row renders a genuine "no data yet" state rather than any
+  // mock/generated fallback.
+  metrics: MetricsResponse | null;
   utilisedPct: string;
 };
 
-export function SliceTable({ dynamicData, utilisedPct }: SliceTableProps) {
+export function SliceTable({ metrics, utilisedPct }: SliceTableProps) {
   return (
     <div className="bg-background p-4">
       <Table>
@@ -30,17 +34,19 @@ export function SliceTable({ dynamicData, utilisedPct }: SliceTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {Object.keys(initialData.slices).map((key) => {
-            const slice =
-              initialData.slices[key as keyof typeof initialData.slices];
-            const metric =
-              dynamicData.metrics[key as keyof typeof dynamicData.metrics];
-            const sla = computeSlaStatus(metric, slice);
-            const slaColor = {
-              VIOLATION: "red",
-              WARNING: "yellow",
-              NOMINAL: "green",
-            }[sla];
+          {(Object.keys(initialData.slices) as SliceKey[]).map((key) => {
+            const slice = initialData.slices[key];
+            const metric = metrics?.[key] ?? null;
+            // computeSlaStatus takes non-nullable SliceMetrics and only
+            // ever returns NOMINAL/WARNING/VIOLATION — it has no concept of
+            // "no data". Null must be branched on here, at the call site,
+            // before computeSlaStatus is invoked at all.
+            const sla = metric === null ? null : computeSlaStatus(metric, slice);
+            const slaLabel = sla ?? "NO DATA";
+            const slaColor =
+              sla === null
+                ? "gray"
+                : { VIOLATION: "red", WARNING: "yellow", NOMINAL: "green" }[sla];
             const priorityColor = {
               PR1: "#a855f7",
               PR2: "#ef4444",
@@ -55,11 +61,13 @@ export function SliceTable({ dynamicData, utilisedPct }: SliceTableProps) {
                   {slice.priority_label}
                 </TableCell>
                 <TableCell>{slice.name}</TableCell>
-                <TableCell style={{ color: slaColor }}>{sla}</TableCell>
+                <TableCell style={{ color: slaColor }}>{slaLabel}</TableCell>
                 <TableCell>
-                  {(metric.tx_throughput_bps / 1_000_000).toFixed(1)}
+                  {metric
+                    ? (metric.tx_throughput_bps / 1_000_000).toFixed(1)
+                    : "—"}
                 </TableCell>
-                <TableCell>{metric.latency_ms ?? "—"}</TableCell>
+                <TableCell>{metric?.latency_ms ?? "—"}</TableCell>
               </TableRow>
             );
           })}

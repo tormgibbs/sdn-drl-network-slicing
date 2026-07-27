@@ -4,9 +4,21 @@ import { SliceTooltip } from "../components/primitives/SliceTooltip";
 import { ChartPanel } from "../components/primitives/slice-dashboard/chartpanel";
 import { useLiveSliceData, type SliceSLA } from "#/hooks/use-live-slice-data";
 import { useReportSla } from "#/hooks/use-reportsla";
+import { initialData } from "#/data/dashboard";
+import { formatBps } from "#/lib/format";
 import type { SliceSharedProps } from "../types/sliceShared";
 
-const STUDENT_PORTAL_SLA: SliceSLA = { minThrpt: 25_000_000, maxLat: 50, maxLoss: 0.1 };
+// Sourced from initialData.slices.student_portal — the single place SLA
+// thresholds are defined, kept in sync with config/slices.yaml. Previously
+// this file held its own hardcoded { minThrpt: 25_000_000, ... } constant —
+// ~8x higher than the real backend config (real value is 3_000_000). Do not
+// hardcode values here again — if slices.yaml changes, update dashboard.ts
+// and this reads the new value automatically.
+const STUDENT_PORTAL_SLA: SliceSLA = {
+  minThrpt: initialData.slices.student_portal.min_throughput_bps,
+  maxLat: initialData.slices.student_portal.max_latency_ms,
+  maxLoss: initialData.slices.student_portal.max_loss_pct,
+};
 
 export function StudentPortalSlice({
   switcherTabs,
@@ -72,7 +84,7 @@ export function StudentPortalSlice({
               `${current.loss_pct.toFixed(3)}%`,
             ]
           : ["— Mbps", "—ms", "—%"],
-        slaTargets: "25 Mbps min\u00a0·\u00a050ms max\u00a0·\u00a00.1% max",
+        slaTargets: `${formatBps(STUDENT_PORTAL_SLA.minThrpt)} min\u00a0·\u00a0${STUDENT_PORTAL_SLA.maxLat}ms max\u00a0·\u00a0${STUDENT_PORTAL_SLA.maxLoss}% max`,
       }}
       right={{
         currentState: [
@@ -86,9 +98,9 @@ export function StudentPortalSlice({
           },
         ],
         slaThresholds: [
-          { label: "MIN THRPT", value: "25 Mbps" },
-          { label: "MAX LAT", value: "50ms" },
-          { label: "MAX LOSS", value: "0.1%" },
+          { label: "MIN THRPT", value: formatBps(STUDENT_PORTAL_SLA.minThrpt) },
+          { label: "MAX LAT", value: `${STUDENT_PORTAL_SLA.maxLat}ms` },
+          { label: "MAX LOSS", value: `${STUDENT_PORTAL_SLA.maxLoss}%` },
           { label: "PRIORITY", value: "P4 (High)", highlight: true },
         ],
         recentCycles,
@@ -108,10 +120,15 @@ export function StudentPortalSlice({
           </defs>
           <CartesianGrid strokeDasharray="2 4" />
           <XAxis dataKey="i" hide />
-          <YAxis domain={[10, 40]} tickCount={4} />
+          {/* Domain widened from the old [10, 40] (tuned around the old
+              wrong 25 Mbps threshold) to [0, 15]. The corrected 3 Mbps SLA
+              MIN line and real live throughput (observed ~1-11 Mbps live)
+              both would have fallen entirely below the old domain's floor
+              of 10. */}
+          <YAxis domain={[0, 15]} tickCount={4} />
           <Tooltip content={<SliceTooltip decimals={2} />} />
           <ReferenceLine
-            y={25}
+            y={STUDENT_PORTAL_SLA.minThrpt / 1_000_000}
             stroke="#6B7280"
             strokeDasharray="4 3"
             label={{ value: "SLA MIN", position: "insideBottomLeft", fill: "#6B7280", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
@@ -127,7 +144,7 @@ export function StudentPortalSlice({
           <YAxis domain={[0, 80]} tickCount={5} />
           <Tooltip content={<SliceTooltip decimals={3} />} />
           <ReferenceLine
-            y={50}
+            y={STUDENT_PORTAL_SLA.maxLat}
             stroke="#FB2C36"
             strokeDasharray="4 3"
             label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#FB2C36", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
@@ -149,7 +166,7 @@ export function StudentPortalSlice({
           <YAxis domain={[0, 0.3]} tickCount={4} />
           <Tooltip content={<SliceTooltip decimals={3} />} />
           <ReferenceLine
-            y={0.1}
+            y={STUDENT_PORTAL_SLA.maxLoss}
             stroke="#EAB308"
             strokeDasharray="4 3"
             label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#EAB308", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}

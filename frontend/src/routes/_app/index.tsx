@@ -1,18 +1,23 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useRef, useEffect } from "react";
-import { getDynamicState, initialData } from "#/data/dashboard";
+import { initialData } from "#/data/dashboard";
 import { computeSlaStatus } from "#/lib/sla";
 import { SliceTable } from "#/components/primitives/slice-table.tsx";
 import { PerformanceCharts } from "#/components/primitives/performance-charts";
 import { SidePanel } from "#/components/primitives/side-panel";
 import { useLiveMetricsStore } from "#/stores/live-metrics-store";
 import { postTrafficScenario, getTrafficState, postAgentControl } from "#/lib/api";
-import type { Mode, Scenario } from "#/types/slice";
+import type { Scenario } from "#/types/slice";
 
 export const Route = createFileRoute("/_app/")({ component: Home });
 
 // Confirmed with teammate: laurel is the model for the demo.
 const DEMO_MODEL_PATH = "models/selected/laurel";
+
+// Matches the units MAX_BW was already defined in (bps) before this file
+// went mock-free. agent.allocation_kbps arrives in kbps from the backend,
+// so it's converted once here rather than silently mixing units.
+const MAX_BW_BPS = 1_000_000_000;
 
 function formatSync(lastUpdated: number | null, nowTick: number): string | null {
   if (lastUpdated === null) return null;
@@ -37,6 +42,7 @@ function Home() {
   const scenarioPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const liveMetrics = useLiveMetricsStore((s) => s.metrics);
+  const metricsHistory = useLiveMetricsStore((s) => s.metricsHistory);
   const agent = useLiveMetricsStore((s) => s.agent);
   const lastUpdated = useLiveMetricsStore((s) => s.lastUpdated);
   const agentRunning = agent !== null;
@@ -48,45 +54,41 @@ function Home() {
 
   const syncLabel = formatSync(lastUpdated, nowTick);
 
-  // Mode fed into getDynamicState is a cosmetic pre-live-data mock-fallback
-  // placeholder only — "heuristic" is never produced here, since it was never
-  // a real live/switchable backend state (confirmed: static/heuristic/DRL are
-  // offline experimental conditions, not live toggles). Not a real mode
-  // selection; purely picks which mock dataset to show before the first WS
-  // tick arrives.
-  const mockFallbackMode: Mode = agentRunning ? "agent" : "static";
-  const dynamicData = getDynamicState(mockFallbackMode, scenarioMode);
-
-  const totalAllocated = Object.values(dynamicData.allocations).reduce(
-    (a, b) => a + b,
-    0,
-  );
-  const MAX_BW = 1_000_000_000;
-  const utilisedPct = ((totalAllocated / MAX_BW) * 100).toFixed(1);
-
-  const totalAggregate =
-    (dynamicData.metrics.vle.tx_throughput_bps +
-      dynamicData.metrics.student_portal.tx_throughput_bps +
-      dynamicData.metrics.admin.tx_throughput_bps +
-      dynamicData.metrics.iot.tx_throughput_bps +
-      dynamicData.metrics.general.tx_throughput_bps) /
-    1_000_000;
-
   const sliceKeys = Object.keys(
     initialData.slices,
   ) as Array<keyof typeof initialData.slices>;
 
-  const breachedSlice = sliceKeys.find((key) => {
-    const latency = dynamicData.metrics[key].latency_ms ?? 0;
-    return latency > initialData.slices[key].max_latency_ms;
-  });
+  // Real allocation source: the agent's own per-tick allocation_kbps.
+  // Genuinely absent (not zero, not mocked) whenever the agent isn't
+  // running or hasn't produced a result yet.
+  const totalAllocatedKbps = agent
+    ? Object.values(agent.allocation_kbps).reduce((a, b) => a + b, 0)
+    : 0;
+  const utilisedPct = agent
+    ? (((totalAllocatedKbps * 1000) / MAX_BW_BPS) * 100).toFixed(1)
+    : "0.0";
 
-  const slaSourceMetrics = liveMetrics ?? dynamicData.metrics;
-  const nominalCount = sliceKeys.filter(
-    (key) =>
-      computeSlaStatus(slaSourceMetrics[key], initialData.slices[key]) ===
-      "NOMINAL",
-  ).length;
+  const totalAggregate = liveMetrics
+    ? sliceKeys.reduce(
+        (sum, key) => sum + liveMetrics[key].tx_throughput_bps,
+        0,
+      ) / 1_000_000
+    : 0;
+
+  const breachedSlice = liveMetrics
+    ? sliceKeys.find((key) => {
+        const latency = liveMetrics[key].latency_ms ?? 0;
+        return latency > initialData.slices[key].max_latency_ms;
+      })
+    : undefined;
+
+  // Same null-check-before-call pattern as slice-table.tsx: computeSlaStatus
+  // takes non-nullable SliceMetrics, so a slice with no live data yet is
+  // simply not counted as NOMINAL rather than being passed null into it.
+  const nominalCount = sliceKeys.filter((key) => {
+    const metric = liveMetrics?.[key] ?? null;
+    return metric !== null && computeSlaStatus(metric, initialData.slices[key]) === "NOMINAL";
+  }).length;
   const slaSatisfaction = ((nominalCount / sliceKeys.length) * 100).toFixed(1);
 
   const reward = agent?.reward ?? null;
@@ -154,9 +156,9 @@ function Home() {
           {syncLabel && <p>{syncLabel}</p>}
         </div>
 
-        <SliceTable dynamicData={dynamicData} utilisedPct={utilisedPct} />
+        <SliceTable metrics={liveMetrics} utilisedPct={utilisedPct} />
         <PerformanceCharts
-          dynamicData={dynamicData}
+          metricsHistory={metricsHistory}
           totalAggregate={totalAggregate}
           breachedSlice={breachedSlice}
         />

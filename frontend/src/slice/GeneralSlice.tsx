@@ -4,9 +4,22 @@ import { SliceTooltip } from "../components/primitives/SliceTooltip";
 import { ChartPanel } from "../components/primitives/slice-dashboard/chartpanel";
 import { useLiveSliceData, type SliceSLA } from "#/hooks/use-live-slice-data";
 import { useReportSla } from "#/hooks/use-reportsla";
+import { initialData } from "#/data/dashboard";
+import { formatBps } from "#/lib/format";
 import type { SliceSharedProps } from "../types/sliceShared";
 
-const GENERAL_SLA: SliceSLA = { minThrpt: 5_000_000, maxLat: 500, maxLoss: 10.0 };
+// Sourced from initialData.slices.general — the single place SLA thresholds
+// are defined, kept in sync with config/slices.yaml. Previously this file
+// held its own hardcoded { minThrpt: 5_000_000, ... } constant that had
+// drifted from the real backend config (real value is 1_000_000); that
+// duplication is why it could go stale silently. Do not hardcode values
+// here again — if slices.yaml changes, update dashboard.ts and this reads
+// the new value automatically.
+const GENERAL_SLA: SliceSLA = {
+  minThrpt: initialData.slices.general.min_throughput_bps,
+  maxLat: initialData.slices.general.max_latency_ms,
+  maxLoss: initialData.slices.general.max_loss_pct,
+};
 
 export function GeneralSlice({
   switcherTabs,
@@ -72,7 +85,7 @@ export function GeneralSlice({
               `${current.loss_pct.toFixed(2)}%`,
             ]
           : ["— Mbps", "—ms", "—%"],
-        slaTargets: "5 Mbps min\u00a0·\u00a0500ms max\u00a0·\u00a010% max",
+        slaTargets: `${formatBps(GENERAL_SLA.minThrpt)} min\u00a0·\u00a0${GENERAL_SLA.maxLat}ms max\u00a0·\u00a0${GENERAL_SLA.maxLoss}% max`,
       }}
       right={{
         currentState: [
@@ -86,9 +99,9 @@ export function GeneralSlice({
           },
         ],
         slaThresholds: [
-          { label: "MIN THRPT", value: "5 Mbps" },
-          { label: "MAX LAT", value: "500ms" },
-          { label: "MAX LOSS", value: "10%" },
+          { label: "MIN THRPT", value: formatBps(GENERAL_SLA.minThrpt) },
+          { label: "MAX LAT", value: `${GENERAL_SLA.maxLat}ms` },
+          { label: "MAX LOSS", value: `${GENERAL_SLA.maxLoss}%` },
           { label: "PRIORITY", value: "P1 (Lowest)", highlight: true },
         ],
         recentCycles,
@@ -111,7 +124,7 @@ export function GeneralSlice({
           <YAxis domain={[0, 15]} tickCount={4} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={5}
+            y={GENERAL_SLA.minThrpt / 1_000_000}
             stroke="#6B7280"
             strokeDasharray="4 3"
             label={{ value: "SLA MIN", position: "insideBottomLeft", fill: "#6B7280", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
@@ -127,7 +140,7 @@ export function GeneralSlice({
           <YAxis domain={[0, 600]} tickCount={5} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={500}
+            y={GENERAL_SLA.maxLat}
             stroke="#FB2C36"
             strokeDasharray="4 3"
             label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#FB2C36", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
@@ -149,7 +162,7 @@ export function GeneralSlice({
           <YAxis domain={[0, 12]} tickCount={4} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={10.0}
+            y={GENERAL_SLA.maxLoss}
             stroke="#EAB308"
             strokeDasharray="4 3"
             label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#EAB308", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}

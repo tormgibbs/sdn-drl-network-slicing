@@ -8,13 +8,22 @@ export type MockDashboardSnapshot = {
 
 export const initialData = {
   slices: {
+    // Values below are the single source of truth for SLA thresholds and
+    // must match config/slices.yaml exactly. They previously matched this
+    // file's own mock dynamicStates numbers instead (5-10x too high for
+    // four of five slices), which caused computeSlaStatus to report
+    // VIOLATION against genuinely healthy real throughput once live data
+    // replaced the mocks. If slices.yaml's thresholds ever change, update
+    // here to match — this is the only place min_throughput_bps should be
+    // defined; the five slice detail pages read from here rather than
+    // holding their own copies.
     vle: {
       name: "VLE",
       priority: 5,
       priority_label: "PR5",
       max_latency_ms: 100,
       max_loss_pct: 0.5,
-      min_throughput_bps: 50000000,
+      min_throughput_bps: 5_000_000,
     },
     student_portal: {
       name: "Student Portal",
@@ -22,7 +31,7 @@ export const initialData = {
       priority_label: "PR4",
       max_latency_ms: 50,
       max_loss_pct: 0.1,
-      min_throughput_bps: 25000000,
+      min_throughput_bps: 3_000_000,
     },
     admin: {
       name: "Admin",
@@ -30,7 +39,7 @@ export const initialData = {
       priority_label: "PR3",
       max_latency_ms: 150,
       max_loss_pct: 1.0,
-      min_throughput_bps: 10000000,
+      min_throughput_bps: 2_000_000,
     },
     iot: {
       name: "IoT",
@@ -38,7 +47,7 @@ export const initialData = {
       priority_label: "PR2",
       max_latency_ms: 200,
       max_loss_pct: 5.0,
-      min_throughput_bps: 64000,
+      min_throughput_bps: 64_000,
     },
     general: {
       name: "General",
@@ -46,7 +55,7 @@ export const initialData = {
       priority_label: "PR1",
       max_latency_ms: 500,
       max_loss_pct: 10.0,
-      min_throughput_bps: 5000000,
+      min_throughput_bps: 1_000_000,
     },
   },
 };

@@ -4,9 +4,22 @@ import { SliceTooltip } from "../components/primitives/SliceTooltip";
 import { ChartPanel } from "../components/primitives/slice-dashboard/chartpanel";
 import { useLiveSliceData, type SliceSLA } from "#/hooks/use-live-slice-data";
 import { useReportSla } from "#/hooks/use-reportsla";
+import { initialData } from "#/data/dashboard";
+import { formatBps } from "#/lib/format";
 import type { SliceSharedProps } from "../types/sliceShared";
 
-const ADMIN_SLA: SliceSLA = { minThrpt: 10_000_000, maxLat: 150, maxLoss: 1.0 };
+// Sourced from initialData.slices.admin — the single place SLA thresholds
+// are defined, kept in sync with config/slices.yaml. Previously this file
+// held its own hardcoded { minThrpt: 10_000_000, ... } constant that had
+// drifted from the real backend config (real value is 2_000_000); that
+// duplication is why it could go stale silently. Do not hardcode values
+// here again — if slices.yaml changes, update dashboard.ts and this reads
+// the new value automatically.
+const ADMIN_SLA: SliceSLA = {
+  minThrpt: initialData.slices.admin.min_throughput_bps,
+  maxLat: initialData.slices.admin.max_latency_ms,
+  maxLoss: initialData.slices.admin.max_loss_pct,
+};
 
 export function AdminSlice({
   switcherTabs,
@@ -72,7 +85,7 @@ export function AdminSlice({
               `${current.loss_pct.toFixed(2)}%`,
             ]
           : ["— Mbps", "—ms", "—%"],
-        slaTargets: "10 Mbps min\u00a0·\u00a0150ms max\u00a0·\u00a01% max",
+        slaTargets: `${formatBps(ADMIN_SLA.minThrpt)} min\u00a0·\u00a0${ADMIN_SLA.maxLat}ms max\u00a0·\u00a0${ADMIN_SLA.maxLoss}% max`,
       }}
       right={{
         currentState: [
@@ -86,9 +99,9 @@ export function AdminSlice({
           },
         ],
         slaThresholds: [
-          { label: "MIN THRPT", value: "10 Mbps" },
-          { label: "MAX LAT", value: "150ms" },
-          { label: "MAX LOSS", value: "1%" },
+          { label: "MIN THRPT", value: formatBps(ADMIN_SLA.minThrpt) },
+          { label: "MAX LAT", value: `${ADMIN_SLA.maxLat}ms` },
+          { label: "MAX LOSS", value: `${ADMIN_SLA.maxLoss}%` },
           { label: "PRIORITY", value: "P3 (Med)", highlight: true },
         ],
         recentCycles,
@@ -108,10 +121,13 @@ export function AdminSlice({
           </defs>
           <CartesianGrid strokeDasharray="2 4" />
           <XAxis dataKey="i" hide />
-          <YAxis domain={[5, 20]} tickCount={4} />
+          {/* Domain widened from the old [5, 20] (tuned around the old wrong
+              10 Mbps threshold) to [0, 20] so the corrected 2 Mbps SLA MIN
+              line stays visible instead of falling below the chart floor. */}
+          <YAxis domain={[0, 20]} tickCount={5} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={10}
+            y={ADMIN_SLA.minThrpt / 1_000_000}
             stroke="#6B7280"
             strokeDasharray="4 3"
             label={{ value: "SLA MIN", position: "insideBottomLeft", fill: "#6B7280", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
@@ -127,7 +143,7 @@ export function AdminSlice({
           <YAxis domain={[0, 200]} tickCount={5} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={150}
+            y={ADMIN_SLA.maxLat}
             stroke="#FB2C36"
             strokeDasharray="4 3"
             label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#FB2C36", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
@@ -149,7 +165,7 @@ export function AdminSlice({
           <YAxis domain={[0, 2]} tickCount={4} />
           <Tooltip content={<SliceTooltip />} />
           <ReferenceLine
-            y={1.0}
+            y={ADMIN_SLA.maxLoss}
             stroke="#EAB308"
             strokeDasharray="4 3"
             label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#EAB308", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
