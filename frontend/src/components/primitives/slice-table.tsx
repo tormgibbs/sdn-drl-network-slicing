@@ -1,87 +1,128 @@
+// frontend/src/components/primitives/slice-table.tsx
+
+import { Badge } from "#/components/ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "#/components/ui/table";
+	Card,
+	CardContent,
+	CardFooter,
+	CardHeader,
+	CardTitle,
+} from "#/components/ui/card";
 import { Progress } from "#/components/ui/progress";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "#/components/ui/table";
 import { initialData } from "#/data/dashboard";
 import type { MetricsResponse } from "#/lib/schemas";
-import type { SliceKey } from "#/types/slice";
 import { computeSlaStatus } from "#/lib/sla";
+import type { SliceKey } from "#/types/slice";
 
 type SliceTableProps = {
-  // Live metrics only — null until the first WS tick arrives, in which
-  // case every row renders a genuine "no data yet" state rather than any
-  // mock/generated fallback.
-  metrics: MetricsResponse | null;
-  utilisedPct: string;
+	metrics: MetricsResponse | null;
+	utilisedPct: string;
+};
+
+const SLA_BADGE: Record<string, { label: string; className: string }> = {
+	VIOLATION: {
+		label: "VIOLATION",
+		className: "bg-[#FB2C36] text-white border-transparent",
+	},
+	WARNING: { label: "WARNING", className: "text-[#FF6900] border-[#FF6900]" },
+	NOMINAL: {
+		label: "NOMINAL",
+		className: "bg-[#00C950] text-black border-transparent",
+	},
 };
 
 export function SliceTable({ metrics, utilisedPct }: SliceTableProps) {
-  return (
-    <div className="bg-background p-4">
-      <Table>
-        <TableHeader>
-          <TableRow className="uppercase">
-            <TableHead>pr</TableHead>
-            <TableHead>slice</TableHead>
-            <TableHead>sla</TableHead>
-            <TableHead>thrpt(mbps)</TableHead>
-            <TableHead>latency(ms)</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {(Object.keys(initialData.slices) as SliceKey[]).map((key) => {
-            const slice = initialData.slices[key];
-            const metric = metrics?.[key] ?? null;
-            // computeSlaStatus takes non-nullable SliceMetrics and only
-            // ever returns NOMINAL/WARNING/VIOLATION — it has no concept of
-            // "no data". Null must be branched on here, at the call site,
-            // before computeSlaStatus is invoked at all.
-            const sla = metric === null ? null : computeSlaStatus(metric, slice);
-            const slaLabel = sla ?? "NO DATA";
-            const slaColor =
-              sla === null
-                ? "gray"
-                : { VIOLATION: "red", WARNING: "yellow", NOMINAL: "green" }[sla];
-            const priorityColor = {
-              PR1: "#a855f7",
-              PR2: "#ef4444",
-              PR3: "#f97316",
-              PR4: "#22c55e",
-              PR5: "#3b82f6",
-            }[slice.priority_label];
+	return (
+		<Card className="shadow-none border-border">
+			<CardHeader>
+				<CardTitle className="text-xl tracking-tight font-medium">
+					Network Slice Status
+				</CardTitle>
+			</CardHeader>
 
-            return (
-              <TableRow key={key}>
-                <TableCell style={{ color: priorityColor }}>
-                  {slice.priority_label}
-                </TableCell>
-                <TableCell>{slice.name}</TableCell>
-                <TableCell style={{ color: slaColor }}>{slaLabel}</TableCell>
-                <TableCell>
-                  {metric
-                    ? (metric.tx_throughput_bps / 1_000_000).toFixed(1)
-                    : "—"}
-                </TableCell>
-                <TableCell>{metric?.latency_ms ?? "—"}</TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+			<CardContent>
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+								PR
+							</TableHead>
+							<TableHead className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+								Slice
+							</TableHead>
+							<TableHead className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+								SLA
+							</TableHead>
+							<TableHead className="w-24 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+								Thrpt (Mbps)
+							</TableHead>
+							<TableHead className="w-24 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+								Latency (ms)
+							</TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{(Object.keys(initialData.slices) as SliceKey[]).map((key) => {
+							const slice = initialData.slices[key];
+							const metric = metrics?.[key] ?? null;
+							const sla =
+								metric === null ? null : computeSlaStatus(metric, slice);
+							const slaBadge = sla ? SLA_BADGE[sla] : null;
 
-      {/* Total BW Allocation Bar */}
-      <div className="mt-4 flex items-center gap-4">
-        <span className="text-xs uppercase text-muted-foreground shrink-0">
-          Total BW Allocation
-        </span>
-        <Progress value={Number(utilisedPct)} />
-        <span className="text-xs shrink-0">{utilisedPct}% Utilized</span>
-      </div>
-    </div>
-  );
+							return (
+								<TableRow key={key}>
+									<TableCell>
+										<span className="font-mono text-sm text-muted-foreground">
+											{slice.priority_label}
+										</span>
+									</TableCell>
+									<TableCell className="font-mono text-sm">
+										{slice.name}
+									</TableCell>
+									<TableCell>
+										{slaBadge ? (
+											<Badge variant="outline" className={slaBadge.className}>
+												{slaBadge.label}
+											</Badge>
+										) : (
+											<Badge variant="secondary">NO DATA</Badge>
+										)}
+									</TableCell>
+									<TableCell className="font-mono text-sm">
+										{metric
+											? (metric.tx_throughput_bps / 1_000_000).toFixed(2)
+											: "—"}
+									</TableCell>
+									<TableCell className="font-mono text-sm">
+										{metric?.latency_ms !== undefined &&
+										metric?.latency_ms !== null
+											? metric.latency_ms.toFixed(1)
+											: "—"}
+									</TableCell>
+								</TableRow>
+							);
+						})}
+					</TableBody>
+				</Table>
+			</CardContent>
+
+			<CardFooter className="flex items-center gap-4 border-t border-dashed">
+				<span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground shrink-0">
+					Total BW Allocation
+				</span>
+				<Progress value={Number(utilisedPct)} />
+				<span className="text-xs font-mono shrink-0">
+					{utilisedPct}% Utilized
+				</span>
+			</CardFooter>
+		</Card>
+	);
 }
