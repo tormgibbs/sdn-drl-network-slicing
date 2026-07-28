@@ -9,7 +9,7 @@ import {
 import type { SliceTrafficConfig, ConfigMap } from "../types/settings";
 
 import { SettingsTopBar } from "./settings-topbar";
-import { SliceSelectorPanel } from "./slice-selectorPanel";
+import { SliceSelectorPanel } from "./slice-selector-panel";
 import { ConfigCanvas } from "./config-canvas";
 import { SettingsFooter } from "./settings-footer"; 
 
