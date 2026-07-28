@@ -72,13 +72,6 @@ export const AgentStateSchema = z.object({
 	done: z.boolean(),
 });
 
-// The actual full envelope /ws/metrics now sends
-export const WsMetricsEnvelopeSchema = z.object({
-	timestamp: z.string(),
-	metrics: MetricsResponseSchema,
-	agent: AgentStateSchema.nullable(),
-});
-
 export const TrafficLoopResultItemSchema = z.object({
 	slice: z.string(),
 	component: z.string(),
@@ -127,10 +120,52 @@ export const TrafficControlRequestSchema = z.object({
 	seed: z.number().int().optional(),
 });
 
+export const HeuristicStateSchema = z.object({
+	timestamp: z.string(),
+	step: z.number().int(),
+	allocation_kbps: z.record(z.string(), z.number()),
+	triggered: z.array(z.string()),
+	done: z.boolean(),
+});
+
+export const ActiveControllerSchema = z.enum(["agent", "heuristic", "static"]);
+
+export const WsMetricsEnvelopeSchema = z.object({
+	timestamp: z.string(),
+	metrics: MetricsResponseSchema,
+	active_controller: ActiveControllerSchema,
+	agent: AgentStateSchema.nullable(),
+	heuristic: HeuristicStateSchema.nullable(),
+	traffic: TrafficStatusSchema.nullable(),
+});
+
 export const AgentStatusSchema = z.object({
 	running: z.boolean(),
 	last_result: AgentStateSchema.nullable(),
 });
+
+export const ControllerSwitchRequestSchema = z.object({
+	controller: ActiveControllerSchema,
+	model_path: z.string().optional(),
+	vecnorm_path: z.string().optional(),
+});
+
+export const ControllerSwitchResponseSchema = z.object({
+	status: z.string(),
+	previous_controller: ActiveControllerSchema,
+	active_controller: ActiveControllerSchema,
+});
+
+export const ControllerActiveResponseSchema = z.object({
+	active_controller: ActiveControllerSchema,
+});
+
+export type ControllerSwitchRequest = z.infer<
+	typeof ControllerSwitchRequestSchema
+>;
+export type ControllerSwitchResponse = z.infer<
+	typeof ControllerSwitchResponseSchema
+>;
 
 export type AgentControlRequest = z.infer<typeof AgentControlRequestSchema>;
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
@@ -147,3 +182,5 @@ export type AllocateRequest = z.input<typeof AllocateRequestSchema>;
 export type AllocateResponse = z.infer<typeof AllocateResponseSchema>;
 export type TrafficLoopResultItem = z.infer<typeof TrafficLoopResultItemSchema>;
 export type TrafficControlRequest = z.infer<typeof TrafficControlRequestSchema>;
+export type HeuristicState = z.infer<typeof HeuristicStateSchema>;
+export type ActiveController = z.infer<typeof ActiveControllerSchema>;

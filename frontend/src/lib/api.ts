@@ -4,6 +4,10 @@ import {
 	AgentStatusSchema,
 	type AllocateRequest,
 	AllocateResponseSchema,
+	ControllerActiveResponseSchema,
+	type ControllerSwitchRequest,
+	ControllerSwitchRequestSchema,
+	ControllerSwitchResponseSchema,
 	HealthResponseSchema,
 	MetricsResponseSchema,
 	type TrafficControlRequest,
@@ -38,17 +42,17 @@ export async function postAllocate(body: AllocateRequest) {
 }
 
 export async function postTrafficScenario(body: TrafficScenarioRequest) {
-  const parsedBody = TrafficScenarioRequestSchema.parse(body);
-  const res = await fetch(`${BASE_URL}/traffic/scenario`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(parsedBody),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `scenario switch failed: ${res.status}`);
-  }
-  return TrafficStatusSchema.parse(await res.json());
+	const parsedBody = TrafficScenarioRequestSchema.parse(body);
+	const res = await fetch(`${BASE_URL}/traffic/scenario`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(parsedBody),
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => null);
+		throw new Error(body?.detail ?? `scenario switch failed: ${res.status}`);
+	}
+	return TrafficStatusSchema.parse(await res.json());
 }
 
 export async function postTrafficControl(body: TrafficControlRequest) {
@@ -60,6 +64,28 @@ export async function postTrafficControl(body: TrafficControlRequest) {
 	});
 	if (!res.ok) throw new Error(`traffic control failed: ${res.status}`);
 	return TrafficStatusSchema.parse(await res.json());
+}
+
+export async function postControllerSwitch(body: ControllerSwitchRequest) {
+	const parsedBody = ControllerSwitchRequestSchema.parse(body);
+	const res = await fetch(`${BASE_URL}/controller/switch`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(parsedBody),
+	});
+	if (!res.ok) {
+		const errBody = await res.json().catch(() => null);
+		throw new Error(
+			errBody?.detail ?? `controller switch failed: ${res.status}`,
+		);
+	}
+	return ControllerSwitchResponseSchema.parse(await res.json());
+}
+
+export async function getControllerActive() {
+	const res = await fetch(`${BASE_URL}/controller/active`);
+	if (!res.ok) throw new Error(`controller active fetch failed: ${res.status}`);
+	return ControllerActiveResponseSchema.parse(await res.json());
 }
 
 // GET /traffic/state — same {running, last_loop} shape as postTrafficScenario's
