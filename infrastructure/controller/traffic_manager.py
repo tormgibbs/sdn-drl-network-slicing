@@ -1,12 +1,16 @@
+# infrastructure/controller/traffic_manager.py
 import logging
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 
 from os_ken.lib import hub
 
 from traffic.runner import TrafficRunner
 
 logger = logging.getLogger(__name__)
+_traffic_runner_logger = logging.getLogger('traffic_runner')
+_LOG_DIR = Path('logs/traffic')
 
 
 class TrafficManager:
@@ -15,10 +19,31 @@ class TrafficManager:
 		self._running = False
 		self._lock = threading.Lock()
 		self._last_loop_result: dict | None = None
+		self._log_handler: logging.Handler | None = None
 
 	def status(self) -> dict:
 		with self._lock:
 			return {'running': self._running, 'last_loop': self._last_loop_result}
+
+	def _attach_log_file(self) -> Path:
+		_LOG_DIR.mkdir(parents=True, exist_ok=True)
+		ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+		log_path = _LOG_DIR / f'traffic_{ts}.log'
+		handler = logging.FileHandler(log_path)
+		handler.setFormatter(
+			logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
+		)
+		_traffic_runner_logger.addHandler(handler)
+		logger.addHandler(handler)
+		self._log_handler = handler
+		return log_path
+
+	def _detach_log_file(self) -> None:
+		if self._log_handler is not None:
+			_traffic_runner_logger.removeHandler(self._log_handler)
+			logger.removeHandler(self._log_handler)
+			self._log_handler.close()
+			self._log_handler = None
 
 	def start(
 		self,
@@ -42,9 +67,14 @@ class TrafficManager:
 
 		with self._lock:
 			self._runner = runner
-
+		log_path = self._attach_log_file()
 		hub.spawn(self._run_loop)
-		logger.info('TrafficManager: started, slices=%s scenario=%s', slices, scenario)
+		logger.info(
+			'TrafficManager: started, slices=%s scenario=%s, logging to %s',
+			slices,
+			scenario,
+			log_path,
+		)
 
 	def stop(self) -> None:
 		with self._lock:
@@ -84,3 +114,4 @@ class TrafficManager:
 				self._running = False
 				self._runner = None
 			logger.info('TrafficManager: stopped')
+			self._detach_log_file()
