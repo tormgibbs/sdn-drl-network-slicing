@@ -23,9 +23,8 @@ WS_URL = 'ws://localhost:8080/ws/metrics'
 EQUAL_SPLIT = [0.2, 0.2, 0.2, 0.2, 0.2]
 
 # Reward function weights (see drl-agent-design.md Reward Function section).
-W1, W2, W3, W4, W5, W6 = 0.35, 0.15, 0.20, 0.10, 0.10, 0.10
+W1, W2, W3, W4, W5, W6 = 0.30, 0.25, 0.15, 0.10, 0.10, 0.10
 
-_CONGESTION_THRESHOLD = 0.85
 _TUNNEL_WAIT_TIMEOUT_SEC = 60
 _TUNNEL_WAIT_POLL_SEC = 2
 
@@ -70,6 +69,12 @@ class CampusSlicingEnv(gym.Env):
 		self.episode_length = episode_length
 		self._step_count = 0
 		self._current_rates_kbps: dict[str, int] | None = None
+
+		# Tracks the previous step's allocation for P_oscillation. Reset in
+		# reset() alongside _current_rates_kbps, so oscillation is measured
+		# from the equal-split baseline on the first step of each episode,
+		# not against a stale value from a prior episode.
+		self._prev_rates_kbps: dict[str, int] | None = None
 
 		self._http = httpx.Client(base_url=API_BASE_URL)
 		self._ws = None
@@ -192,10 +197,11 @@ class CampusSlicingEnv(gym.Env):
 	def _compute_reward(self, metrics: dict, active_names: list[str]) -> float:
 		self._assert_rates_valid()
 		n_active = len(active_names)
+
 		r_sla = 0.0
 		p_latency = 0.0
 		p_loss = 0.0
-		p_congestion = 0.0
+		p_oscillation = 0.0
 		r_util_sum = 0.0
 		fairness_ratios = []
 
@@ -206,20 +212,36 @@ class CampusSlicingEnv(gym.Env):
 			Li = cfg['max_latency_ms']
 			Loss_i = cfg['max_loss_pct']
 
+			latency_i = m['latency_ms']
 			loss_i = m['loss_pct']
 
-			latency_ms_ok = m['latency_ms'] <= Li
-			p_latency += si * max(0.0, (m['latency_ms'] - Li) / Li)
+			latency_ratio = latency_i / Li
+			loss_ratio = loss_i / Loss_i
 
-			sla_met = latency_ms_ok and loss_i <= Loss_i
-			r_sla += si * (1.0 if sla_met else 0.0)
-			p_loss += si * (loss_i / 100.0)
+			p_latency += si * (latency_ratio**2)
+
+			# Normalised by each slice's own loss threshold -- a tight-SLA slice
+			# is penalised more harshly for the same absolute loss percentage
+			# than a loose-SLA slice.
+			p_loss += si * loss_ratio
+
+			latency_sat = max(0.0, 1.0 - latency_ratio)
+			loss_sat = max(0.0, 1.0 - loss_ratio)
+			r_sla += si * (latency_sat * loss_sat)
 
 			util_i = self._utilisation(name, metrics)
 			r_util_sum += util_i
-			p_congestion += si * max(0.0, util_i - _CONGESTION_THRESHOLD)
 
 			fairness_ratios.append(self._current_rates_kbps[name] / si)
+
+			# Penalises allocation swings between steps to discourage
+			# control-plane churn (repeated OFPMeterMod installs).
+			current_rate = self._current_rates_kbps[name]
+			prev_rate = self._prev_rates_kbps[name]
+			change = abs(current_rate - prev_rate) / self.c_kbps
+			p_oscillation += change
+
+		self._prev_rates_kbps = dict(self._current_rates_kbps)
 
 		r_util = r_util_sum / n_active
 
@@ -233,7 +255,7 @@ class CampusSlicingEnv(gym.Env):
 			W1 * r_sla
 			- W2 * p_latency
 			- W3 * p_loss
-			- W4 * p_congestion
+			- W4 * p_oscillation
 			+ W5 * r_util
 			- W6 * p_fairness
 		)
@@ -245,6 +267,7 @@ class CampusSlicingEnv(gym.Env):
 		try:
 			self._wait_for_tunnels()
 			self._current_rates_kbps = self._apply_allocation(EQUAL_SPLIT)
+			self._prev_rates_kbps = dict(self._current_rates_kbps)
 			self._connect_ws()
 			metrics = self._wait_for_stats()
 			self._validate_metrics(metrics)
