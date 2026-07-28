@@ -1,3 +1,5 @@
+// frontend/src/components/primitives/performance-charts/index.tsx
+
 import { useState } from "react";
 import { initialData } from "#/data/dashboard";
 import type { SliceMetricPoint } from "#/stores/live-metrics-store";

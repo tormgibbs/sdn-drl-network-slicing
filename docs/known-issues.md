@@ -115,4 +115,25 @@ before trusting it. Tracked in PENDING.
 
 ---
 
+## Jitter not shown for slices
+
+The "JITTER" row in each slice's Current State panel is sourced from
+iperf3's per-loop traffic results (`/traffic/state`'s `last_loop.results`,
+`continuous` component). iperf3 only computes jitter for UDP streams —
+TCP's own retransmission/reordering logic means the tool has no way to
+measure it for TCP flows.
+
+VLE, Student Portal, and IoT run UDP traffic and will show a real jitter
+value once the traffic generator has completed at least one loop. Admin
+and General run TCP traffic and will never show a jitter row — this is
+a protocol-level limitation, not a missing metric or a bug.
+
+No workaround was adopted: running a parallel synthetic UDP probe on
+Admin/General purely to produce a jitter number would measure fake
+traffic instead of what those slices actually carry, undermining the
+metric rather than fixing a gap. The row's absence for TCP slices is
+intentional and correct.
+
+---
+
 For 5GC-specific failure modes and diagnostic commands see `docs/debugging-5gc.md`.
