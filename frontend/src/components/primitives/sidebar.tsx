@@ -1,32 +1,42 @@
-import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar"
-import { sidebarItems } from "#/data/sidebar"
-import { Link } from "@tanstack/react-router"
-import { useLocation } from "@tanstack/react-router";
+// frontend/src/components/primitives/sidebar.tsx
+import { Link, useLocation } from "@tanstack/react-router";
+import { sidebarItems } from "#/data/sidebar";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "../ui/sidebar";
 
-export default function AppSidebar({ ...props}: React.ComponentProps<typeof Sidebar>) {
-    const location = useLocation();
-    return (
-      <Sidebar className="dark bg-background text-foreground" collapsible="offcanvas" { ...props}>
-        <SidebarHeader>
-          <div className="flex flex-col gap-2 leading-none">
-            <p className="font-medium text-3xl">UMaT 5G SDN</p>
-          </div>
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarMenu>
-            {sidebarItems.map((item) => (
-              <SidebarMenuItem key={item.label}>
-                <SidebarMenuButton asChild isActive={location.pathname === item.href}>
-                  <Link to={item.href} className="flex items-center gap-2">
-                  <item.icon className="size-4"/>
-                  <span>{item.label}</span>
-                  </Link>
-
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarContent>
-      </Sidebar>
-    );
+export default function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const location = useLocation();
+  return (
+    <Sidebar className="bg-background text-foreground" collapsible="offcanvas" {...props}>
+      <SidebarHeader className="border-b border-border px-3 py-4">
+        <p className="text-xl tracking-tight font-medium">UMaT 5G SDN</p>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarMenu>
+          {sidebarItems.map((item) => (
+            <SidebarMenuItem key={item.label}>
+              <SidebarMenuButton
+                asChild
+                isActive={location.pathname === item.href}
+                className="rounded-none"
+              >
+                <Link to={item.href} className="flex items-center gap-2">
+                  <item.icon className="size-4" />
+                  <span className="font-mono text-[11px] uppercase tracking-wider">
+                    {item.label}
+                  </span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+      </SidebarContent>
+    </Sidebar>
+  );
 }

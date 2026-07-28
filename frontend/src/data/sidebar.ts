@@ -1,26 +1,21 @@
+// frontend/src/data/sidebar.ts
 import type { SideBarItem } from "#/types/dashboard";
-import { Bot, Layers3, LayoutDashboard, Settings } from "lucide-react";
+import { Bot, Layers3, LayoutDashboard } from "lucide-react";
 
 export const sidebarItems: SideBarItem[] = [
     {
        icon: LayoutDashboard,
        href: "/",
-       label: "Dashboard" 
+       label: "Dashboard"
     },
     {
        icon: Layers3,
        href: "/slices",
-       label: "Slices" 
+       label: "Slices"
     },
     {
        icon: Bot,
-       href: "/agent",
-       label: "Agent" 
+       href: "/controller",
+       label: "Controller"
     },
-    {
-       icon: Settings,
-       href: "/settings",
-       label: "Settings" 
-    },
-    
 ]
