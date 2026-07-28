@@ -11,9 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
-import { Route as AppSlicesRouteImport } from './routes/_app/slices'
+import { Route as AppControllerRouteImport } from './routes/_app/controller'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
-import { Route as AppAgentRouteImport } from './routes/_app/agent'
+import { Route as AppSlicesRouteImport } from './routes/_app/slices'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -24,9 +24,9 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppSlicesRoute = AppSlicesRouteImport.update({
-  id: '/slices',
-  path: '/slices',
+const AppControllerRoute = AppControllerRouteImport.update({
+  id: '/controller',
+  path: '/controller',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
@@ -34,20 +34,20 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAgentRoute = AppAgentRouteImport.update({
-  id: '/agent',
-  path: '/agent',
+const AppSlicesRoute = AppSlicesRouteImport.update({
+  id: '/slices',
+  path: '/slices',
   getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
-  '/agent': typeof AppAgentRoute
+  '/controller': typeof AppControllerRoute
   '/settings': typeof AppSettingsRoute
   '/slices': typeof AppSlicesRoute
 }
 export interface FileRoutesByTo {
-  '/agent': typeof AppAgentRoute
+  '/controller': typeof AppControllerRoute
   '/settings': typeof AppSettingsRoute
   '/slices': typeof AppSlicesRoute
   '/': typeof AppIndexRoute
@@ -55,20 +55,20 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
-  '/_app/agent': typeof AppAgentRoute
+  '/_app/controller': typeof AppControllerRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/slices': typeof AppSlicesRoute
   '/_app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/agent' | '/settings' | '/slices'
+  fullPaths: '/' | '/controller' | '/settings' | '/slices'
   fileRoutesByTo: FileRoutesByTo
-  to: '/agent' | '/settings' | '/slices' | '/'
+  to: '/controller' | '/settings' | '/slices' | '/'
   id:
     | '__root__'
     | '/_app'
-    | '/_app/agent'
+    | '/_app/controller'
     | '/_app/settings'
     | '/_app/slices'
     | '/_app/'
@@ -94,11 +94,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/slices': {
-      id: '/_app/slices'
-      path: '/slices'
-      fullPath: '/slices'
-      preLoaderRoute: typeof AppSlicesRouteImport
+    '/_app/controller': {
+      id: '/_app/controller'
+      path: '/controller'
+      fullPath: '/controller'
+      preLoaderRoute: typeof AppControllerRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings': {
@@ -108,25 +108,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/agent': {
-      id: '/_app/agent'
-      path: '/agent'
-      fullPath: '/agent'
-      preLoaderRoute: typeof AppAgentRouteImport
+    '/_app/slices': {
+      id: '/_app/slices'
+      path: '/slices'
+      fullPath: '/slices'
+      preLoaderRoute: typeof AppSlicesRouteImport
       parentRoute: typeof AppRoute
     }
   }
 }
 
 interface AppRouteChildren {
-  AppAgentRoute: typeof AppAgentRoute
+  AppControllerRoute: typeof AppControllerRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppSlicesRoute: typeof AppSlicesRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppAgentRoute: AppAgentRoute,
+  AppControllerRoute: AppControllerRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppSlicesRoute: AppSlicesRoute,
   AppIndexRoute: AppIndexRoute,
