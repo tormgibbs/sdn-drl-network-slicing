@@ -6,25 +6,25 @@ import { SidePanel } from "#/components/primitives/side-panel";
 import { SliceTable } from "#/components/primitives/slice-table.tsx";
 import { initialData } from "#/data/dashboard";
 import { useTrafficControl } from "#/hooks/use-traffic-control";
-import { postAgentControl } from "#/lib/api";
+import { postControllerSwitch } from "#/lib/api";
+import type { ActiveController } from "#/lib/schemas";
 import { computeSlaStatus } from "#/lib/sla";
 import { useLiveMetricsStore } from "#/stores/live-metrics-store";
 
 export const Route = createFileRoute("/_app/")({ component: Home });
 
-const DEMO_MODEL_PATH = "models/selected/laurel";
-
+const DEMO_MODEL_PATH = "models/selected/magnolia";
 const MAX_BW_BPS = 1_000_000_000;
 
 function Home() {
-	const [isAgentBusy, setIsAgentBusy] = useState(false);
-
+	const [isSwitchingController, setIsSwitchingController] = useState(false);
 	const traffic = useTrafficControl();
 
 	const liveMetrics = useLiveMetricsStore((s) => s.metrics);
 	const metricsHistory = useLiveMetricsStore((s) => s.metricsHistory);
+	const activeController = useLiveMetricsStore((s) => s.activeController);
 	const agent = useLiveMetricsStore((s) => s.agent);
-	const agentRunning = agent !== null;
+	const heuristicHistory = useLiveMetricsStore((s) => s.heuristicHistory);
 
 	const sliceKeys = Object.keys(initialData.slices) as Array<
 		keyof typeof initialData.slices
@@ -61,26 +61,23 @@ function Home() {
 	const slaSatisfaction = ((nominalCount / sliceKeys.length) * 100).toFixed(1);
 
 	const reward = agent?.reward ?? null;
+	const triggerCount = heuristicHistory.reduce(
+		(sum, p) => sum + p.triggered.length,
+		0,
+	);
 
-	const handleAgentStart = async () => {
-		setIsAgentBusy(true);
+	const handleControllerChange = async (controller: ActiveController) => {
+		setIsSwitchingController(true);
 		try {
-			await postAgentControl({ action: "start", model_path: DEMO_MODEL_PATH });
+			await postControllerSwitch(
+				controller === "agent"
+					? { controller, model_path: DEMO_MODEL_PATH }
+					: { controller },
+			);
 		} catch (err) {
-			console.error("agent start request failed", err);
+			console.error("controller switch failed", err);
 		} finally {
-			setIsAgentBusy(false);
-		}
-	};
-
-	const handleAgentStop = async () => {
-		setIsAgentBusy(true);
-		try {
-			await postAgentControl({ action: "stop" });
-		} catch (err) {
-			console.error("agent stop request failed", err);
-		} finally {
-			setIsAgentBusy(false);
+			setIsSwitchingController(false);
 		}
 	};
 
@@ -88,20 +85,17 @@ function Home() {
 		<div className="text-foreground p-4 flex justify-between gap-8">
 			<div className="flex-1 flex flex-col gap-4">
 				<SliceTable metrics={liveMetrics} utilisedPct={utilisedPct} />
-
 				<PerformanceCharts
 					metricsHistory={metricsHistory}
 					totalAggregate={totalAggregate}
 					breachedSlice={breachedSlice}
 				/>
 			</div>
-
 			<div className="w-80 shrink-0">
 				<SidePanel
-					agentRunning={agentRunning}
-					isAgentBusy={isAgentBusy}
-					onAgentStart={handleAgentStart}
-					onAgentStop={handleAgentStop}
+					activeController={activeController}
+					isSwitchingController={isSwitchingController}
+					onControllerChange={handleControllerChange}
 					trafficRunning={traffic.running}
 					isTrafficBusy={traffic.isTrafficBusy}
 					onTrafficStart={traffic.startTraffic}
@@ -111,6 +105,7 @@ function Home() {
 					onScenarioChange={traffic.switchScenario}
 					slaSatisfaction={slaSatisfaction}
 					reward={reward}
+					triggerCount={triggerCount}
 				/>
 			</div>
 		</div>
