@@ -11,11 +11,14 @@ import threading
 from contextlib import asynccontextmanager
 
 import uvicorn
+import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
+
+_SLICES_CONFIG_PATH = 'config/slices.yaml'
 
 
 class _Registry:
@@ -81,6 +84,10 @@ class _Registry:
 
 registry = _Registry()
 
+SWITCH_TIMEOUT = 8.0
+
+_switch_lock = threading.Lock()
+
 
 def _get_stats_collector():
 	sc = registry.stats_collector
@@ -124,6 +131,21 @@ def health():
 	return {'status': 'ok', 'registry_frozen': registry.frozen}
 
 
+@app.get('/config/slices')
+def get_slice_config():
+	with open(_SLICES_CONFIG_PATH) as f:
+		config = yaml.safe_load(f)
+	return {
+		name: {
+			'priority': cfg['priority'],
+			'max_latency_ms': cfg['max_latency_ms'],
+			'max_loss_pct': cfg['max_loss_pct'],
+			'min_throughput_bps': cfg['min_throughput_bps'],
+		}
+		for name, cfg in config['slices'].items()
+	}
+
+
 @app.websocket('/ws/metrics')
 async def ws_metrics(websocket: WebSocket):
 	await websocket.accept()
@@ -142,14 +164,30 @@ async def broadcast_metrics(data: dict) -> None:
 	import datetime as _dt
 
 	am = registry.agent_manager
+	hm = registry.heuristic_manager
+	tm = registry.traffic_manager
+
 	agent_status = await run_in_threadpool(am.status) if am is not None else None
+	heuristic_status = await run_in_threadpool(hm.status) if hm is not None else None
+	traffic_status = await run_in_threadpool(tm.status) if tm is not None else None
+
+	active_controller = None
+	if agent_status and agent_status['running']:
+		active_controller = 'agent'
+	elif heuristic_status and heuristic_status['running']:
+		active_controller = 'heuristic'
+	else:
+		active_controller = 'static'
 
 	payload = {
 		'timestamp': _dt.datetime.now(_dt.timezone.utc).isoformat(),
 		'metrics': data,
-		'agent': agent_status['last_result']
-		if agent_status and agent_status['running']
+		'active_controller': active_controller,
+		'agent': agent_status['last_result'] if active_controller == 'agent' else None,
+		'heuristic': heuristic_status['last_result']
+		if active_controller == 'heuristic'
 		else None,
+		'traffic': traffic_status,
 	}
 
 	dead = set()
@@ -207,6 +245,68 @@ def allocate(allocations: dict[str, float]):
 	rates_kbps = mm.install_meters(allocations)
 
 	return {'status': 'ok', 'rates_kbps': rates_kbps}
+
+
+@app.post('/controller/switch')
+async def controller_switch(body: dict):
+	target = body.get('controller')
+	if target not in ('agent', 'heuristic', 'static'):
+		raise HTTPException(status_code=422, detail=f'Unknown controller: {target!r}')
+
+	am = registry.agent_manager
+	hm = registry.heuristic_manager
+	if target == 'agent' and am is None:
+		raise HTTPException(status_code=503, detail='Agent manager not available')
+	if target == 'heuristic' and hm is None:
+		raise HTTPException(status_code=503, detail='Heuristic manager not available')
+
+	if not _switch_lock.acquire(blocking=False):
+		raise HTTPException(status_code=409, detail='Switch already in progress')
+	try:
+		agent_status = await run_in_threadpool(am.status) if am is not None else None
+		heuristic_status = await run_in_threadpool(hm.status) if hm is not None else None
+
+		previous = 'static'
+		if agent_status and agent_status['running']:
+			previous = 'agent'
+		elif heuristic_status and heuristic_status['running']:
+			previous = 'heuristic'
+
+		if agent_status and agent_status['running']:
+			if not await run_in_threadpool(am.stop_and_wait, SWITCH_TIMEOUT):
+				raise HTTPException(status_code=504, detail='Agent did not stop in time')
+		if heuristic_status and heuristic_status['running']:
+			if not await run_in_threadpool(hm.stop_and_wait, SWITCH_TIMEOUT):
+				raise HTTPException(status_code=504, detail='Heuristic did not stop in time')
+
+		if target == 'agent':
+			model_path = body.get('model_path')
+			if not model_path:
+				raise HTTPException(status_code=422, detail='model_path required for agent')
+			await run_in_threadpool(am.start, model_path, body.get('vecnorm_path'))
+		elif target == 'heuristic':
+			await run_in_threadpool(hm.start)
+
+		return {
+			'status': 'ok',
+			'previous_controller': previous,
+			'active_controller': target,
+		}
+	finally:
+		_switch_lock.release()
+
+
+@app.get('/controller/active')
+async def controller_active():
+	am = registry.agent_manager
+	hm = registry.heuristic_manager
+	agent_status = await run_in_threadpool(am.status) if am is not None else None
+	heuristic_status = await run_in_threadpool(hm.status) if hm is not None else None
+	if agent_status and agent_status['running']:
+		return {'active_controller': 'agent'}
+	if heuristic_status and heuristic_status['running']:
+		return {'active_controller': 'heuristic'}
+	return {'active_controller': 'static'}
 
 
 @app.get('/agent/state')

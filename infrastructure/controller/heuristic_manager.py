@@ -19,6 +19,8 @@ class HeuristicManager:
 		self._running = False
 		self._lock = threading.Lock()
 		self._last_result: dict | None = None
+		self._stopped_event = threading.Event()
+		self._stopped_event.set()
 
 	def status(self) -> dict:
 		with self._lock:
@@ -29,6 +31,7 @@ class HeuristicManager:
 			if self._running:
 				raise RuntimeError('Heuristic already running')
 			self._running = True
+		self._stopped_event.clear()
 		try:
 			with open(_SLICES_CONFIG_PATH) as f:
 				slices_config = yaml.safe_load(f)
@@ -36,6 +39,7 @@ class HeuristicManager:
 		except Exception:
 			with self._lock:
 				self._running = False
+			self._stopped_event.set()
 			raise
 		with self._lock:
 			self._runner = runner
@@ -49,6 +53,10 @@ class HeuristicManager:
 				return
 			self._runner.request_stop()
 		logger.info('HeuristicManager: stop requested')
+
+	def stop_and_wait(self, timeout: float | None = None) -> bool:
+		self.stop()
+		return self._stopped_event.wait(timeout)
 
 	def _on_step(self, result) -> None:
 		with self._lock:
@@ -65,4 +73,5 @@ class HeuristicManager:
 				runner, self._runner = self._runner, None
 			if runner is not None:
 				runner.close()
+			self._stopped_event.set()
 			logger.info('HeuristicManager: stopped')

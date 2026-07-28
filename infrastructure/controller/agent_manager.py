@@ -21,6 +21,8 @@ class AgentManager:
 		self._running = False
 		self._lock = threading.Lock()
 		self._last_result: dict | None = None
+		self._stopped_event = threading.Event()
+		self._stopped_event.set()
 
 	def status(self) -> dict:
 		with self._lock:
@@ -31,7 +33,7 @@ class AgentManager:
 			if self._running:
 				raise RuntimeError('Agent already running')
 			self._running = True
-
+		self._stopped_event.clear()
 		try:
 			with open(_SLICES_CONFIG_PATH) as f:
 				slices_config = yaml.safe_load(f)
@@ -39,6 +41,7 @@ class AgentManager:
 		except Exception:
 			with self._lock:
 				self._running = False
+			self._stopped_event.set()
 			raise
 
 		with self._lock:
@@ -54,9 +57,10 @@ class AgentManager:
 				return
 			self._runner.request_stop()
 		logger.info('AgentManager: stop requested')
-		# Not blocking here -- the loop thread may be mid-step, blocked on
-		# the metrics WebSocket. _run_loop's finally block flips _running
-		# back to False once it actually exits.
+
+	def stop_and_wait(self, timeout: float | None = None) -> bool:
+		self.stop()
+		return self._stopped_event.wait(timeout)
 
 	def _on_step(self, result) -> None:
 		with self._lock:
@@ -73,4 +77,5 @@ class AgentManager:
 				runner, self._runner = self._runner, None
 			if runner is not None:
 				runner.close()
+			self._stopped_event.set()
 			logger.info('AgentManager: stopped')
