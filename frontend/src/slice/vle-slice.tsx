@@ -1,181 +1,62 @@
-import { Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, AreaChart, LineChart, ReferenceLine } from "recharts";
-import { SliceLayout } from "../components/primitives/Slicelayout";
-import { SliceTooltip } from "../components/primitives/SliceTooltip";
-import { ChartPanel } from "../components/primitives/slice-dashboard/chartpanel";
-import { useLiveSliceData, type SliceSLA } from "#/hooks/use-live-slice-data";
-import { useReportSla } from "#/hooks/use-reportsla";
-import { initialData } from "#/data/dashboard";
-import { formatBps } from "#/lib/format";
-import type { SliceSharedProps } from "../types/sliceShared";
+// frontend/src/slice/vle-slice.tsx
 
-// Sourced from initialData.slices.vle — the single place SLA thresholds are
-// defined, kept in sync with config/slices.yaml. Previously this file held
-// its own hardcoded { minThrpt: 50_000_000, ... } constant — 10x higher than
-// the real backend config (real value is 5_000_000), the largest drift of
-// any slice. Do not hardcode values here again — if slices.yaml changes,
-// update dashboard.ts and this reads the new value automatically.
-const VLE_SLA: SliceSLA = {
-  minThrpt: initialData.slices.vle.min_throughput_bps,
-  maxLat: initialData.slices.vle.max_latency_ms,
-  maxLoss: initialData.slices.vle.max_loss_pct,
+import { initialData } from "#/data/dashboard";
+import { SliceDetailView } from "../components/primitives/slice-detail-view";
+import type { SliceSharedProps } from "../types/slice-shared";
+import type { SliceViewConfig } from "../types/slice-view-config";
+
+const VLE_CONFIG: SliceViewConfig = {
+	key: "vle",
+	name: "VLE",
+	priority: "P5",
+	priorityLabel: "P5 (Critical)",
+	sla: {
+		minThrpt: initialData.slices.vle.min_throughput_bps,
+		maxLat: initialData.slices.vle.max_latency_ms,
+		maxLoss: initialData.slices.vle.max_loss_pct,
+	},
+	unitDivisor: 1_000_000,
+	unitLabel: "Mbps",
+	charts: [
+		{
+			type: "area",
+			title: "Throughput",
+			dataKey: "thrpt",
+			color: "#2B7FFF",
+			yDomain: [0, 15],
+			slaLine: {
+				value: initialData.slices.vle.min_throughput_bps / 1e6,
+				color: "#6B7280",
+				label: "SLA MIN",
+			},
+		},
+		{
+			type: "line",
+			title: "Latency",
+			dataKey: "lat",
+			color: "#2B7FFF",
+			yDomain: [0, 10],
+			slaLine: {
+				value: initialData.slices.vle.max_latency_ms,
+				color: "#FB2C36",
+				label: "SLA MAX",
+			},
+		},
+		{
+			type: "area",
+			title: "Packet Loss",
+			dataKey: "loss",
+			color: "#FB2C36",
+			yDomain: [0, 2],
+			slaLine: {
+				value: initialData.slices.vle.max_loss_pct,
+				color: "#FF6900",
+				label: "SLA MAX",
+			},
+		},
+	],
 };
 
-export function VLESlice({
-  switcherTabs,
-  activeSlice,
-  onSliceChange,
-  onSlaChange,
-}: SliceSharedProps) {
-  const { current, history, slaMet, allocationBps } = useLiveSliceData("vle", VLE_SLA);
-
-  useReportSla(slaMet ?? false, onSlaChange);
-
-  const thrptMbps = current ? current.tx_throughput_bps / 1_000_000 : null;
-  const allocMbps = allocationBps !== null ? allocationBps / 1_000_000 : null;
-
-  const chartData = history.map((p, i) => ({
-    i,
-    thrpt: p.tx_throughput_bps / 1_000_000,
-    lat: p.latency_ms,
-    loss: p.loss_pct,
-  }));
-
-  // Synthesized id (structural bookkeeping, not a claimed backend value) +
-  // real ts from accumulated history, per team decision.
-  const recentCycles = history
-    .slice(-7)
-    .reverse()
-    .map((p, i) => ({
-      id: `vle-${history.length - i}`,
-      thrpt: p.tx_throughput_bps / 1_000_000,
-      lat: p.latency_ms,
-      status: (p.latency_ms <= VLE_SLA.maxLat &&
-        p.tx_throughput_bps >= VLE_SLA.minThrpt &&
-        p.loss_pct <= VLE_SLA.maxLoss
-        ? "MET"
-        : "VIOLATION") as "MET" | "VIOLATION",
-    }));
-
-  const historyRows = history.map((p, i) => ({
-    ts: new Date(p.timestamp).toISOString(),
-    id: `vle-${i}`,
-    thrpt: p.tx_throughput_bps / 1_000_000,
-    lat: p.latency_ms,
-    loss: p.loss_pct,
-    alloc: allocMbps ?? 0,
-    sla: (p.latency_ms <= VLE_SLA.maxLat &&
-      p.tx_throughput_bps >= VLE_SLA.minThrpt &&
-      p.loss_pct <= VLE_SLA.maxLoss
-      ? "MET"
-      : "VIOLATION") as "MET" | "VIOLATION",
-  }));
-
-  return (
-    <SliceLayout
-      switcherTabs={switcherTabs}
-      activeSlice={activeSlice}
-      onSliceChange={onSliceChange}
-      timeRange="1M"
-      onTimeRangeChange={() => {}}
-      telemetryLabel="Telemetry Timeline"
-      header={{
-        name: "VLE",
-        priority: "P5",
-        slaMet: slaMet,
-        metricChips: current
-          ? [
-              `${thrptMbps!.toFixed(1)} Mbps`,
-              `${current.latency_ms.toFixed(1)}ms`,
-              `${current.loss_pct.toFixed(1)}%`,
-            ]
-          : ["— Mbps", "—ms", "—%"],
-        slaTargets: `${formatBps(VLE_SLA.minThrpt)} min · ${VLE_SLA.maxLat}ms max · ${VLE_SLA.maxLoss}% max`,
-      }}
-      right={{
-        currentState: [
-          { label: "THROUGHPUT", value: current ? `${thrptMbps!.toFixed(1)} Mbps` : "—" },
-          { label: "LATENCY", value: current ? `${current.latency_ms.toFixed(1)}ms` : "—" },
-          { label: "PACKET LOSS", value: current ? `${current.loss_pct.toFixed(1)}%` : "—" },
-          {
-            label: "ALLOCATED",
-            value: allocMbps !== null ? `${allocMbps.toFixed(1)} Mbps` : "AGENT INACTIVE",
-            highlight: true,
-          },
-        ],
-        slaThresholds: [
-          { label: "MIN THRPT", value: formatBps(VLE_SLA.minThrpt) },
-          { label: "MAX LAT", value: `${VLE_SLA.maxLat}ms` },
-          { label: "MAX LOSS", value: `${VLE_SLA.maxLoss}%` },
-          { label: "PRIORITY", value: "P5 (Critical)", highlight: true },
-        ],
-        recentCycles,
-      }}
-      history={{ rows: historyRows, title: "History — Last 50 Cycles" }}
-    >
-      <ChartPanel title="Throughput">
-        <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-          <defs>
-            <linearGradient id="gVleThrpt" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#2B7FFF" stopOpacity={0.2} />
-              <stop offset="95%" stopColor="#2B7FFF" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="2 4" />
-          <XAxis dataKey="i" hide />
-          {/* Domain widened from the old [30, 60] (tuned around the old
-              wrong 50 Mbps threshold) to [0, 15]. The corrected 5 Mbps SLA
-              MIN line and real live VLE throughput (observed ~7-11 Mbps
-              live) both would have fallen entirely below the old domain's
-              floor of 30 — the chart would have shown nothing. */}
-          <YAxis domain={[0, 15]} tickCount={4} />
-          <Tooltip content={<SliceTooltip />} />
-          <ReferenceLine
-            y={VLE_SLA.minThrpt / 1_000_000}
-            stroke="#6B7280"
-            strokeDasharray="4 3"
-            label={{ value: "SLA MIN", position: "insideBottomLeft", fill: "#6B7280", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
-          />
-          <Area type="monotone" dataKey="thrpt" name="Mbps" stroke="#2B7FFF" strokeWidth={1.5} fill="url(#gVleThrpt)" dot={false} isAnimationActive={false} />
-        </AreaChart>
-      </ChartPanel>
-
-      <ChartPanel title="Latency">
-        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-          <CartesianGrid strokeDasharray="2 4" />
-          <XAxis dataKey="i" hide />
-          <YAxis domain={[0, 10]} tickCount={4} />
-          <Tooltip content={<SliceTooltip />} />
-          <ReferenceLine
-            y={VLE_SLA.maxLat}
-            stroke="#FB2C36"
-            strokeDasharray="4 3"
-            label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#FB2C36", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
-          />
-          <Line type="monotone" dataKey="lat" name="ms" stroke="#2B7FFF" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-        </LineChart>
-      </ChartPanel>
-
-      <ChartPanel title="Packet Loss">
-        <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-          <defs>
-            <linearGradient id="gVleLoss" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#FB2C36" stopOpacity={0.15} />
-              <stop offset="95%" stopColor="#FB2C36" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="2 4" />
-          <XAxis dataKey="i" hide />
-          <YAxis domain={[0, 2]} tickCount={4} />
-          <Tooltip content={<SliceTooltip />} />
-          <ReferenceLine
-            y={VLE_SLA.maxLoss}
-            stroke="#EAB308"
-            strokeDasharray="4 3"
-            label={{ value: "SLA MAX", position: "insideTopLeft", fill: "#EAB308", fontSize: 9, fontFamily: "JetBrains Mono,monospace" }}
-          />
-          <Area type="monotone" dataKey="loss" name="%" stroke="#FB2C36" strokeWidth={1.5} fill="url(#gVleLoss)" dot={false} isAnimationActive={false} />
-        </AreaChart>
-      </ChartPanel>
-    </SliceLayout>
-  );
+export function VLESlice(props: SliceSharedProps) {
+	return <SliceDetailView config={VLE_CONFIG} {...props} />;
 }

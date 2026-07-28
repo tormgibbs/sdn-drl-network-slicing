@@ -1,6 +1,5 @@
 // frontend/src/components/primitives/slice-table.tsx
 
-import { Badge } from "#/components/ui/badge";
 import {
 	Card,
 	CardContent,
@@ -21,6 +20,7 @@ import { initialData } from "#/data/dashboard";
 import type { MetricsResponse } from "#/lib/schemas";
 import { computeSlaStatus } from "#/lib/sla";
 import type { SliceKey } from "#/types/slice";
+import { StatusBadge } from "./status-badge";
 
 type SliceTableProps = {
 	metrics: MetricsResponse | null;
@@ -89,11 +89,12 @@ export function SliceTable({ metrics, utilisedPct }: SliceTableProps) {
 									</TableCell>
 									<TableCell>
 										{slaBadge ? (
-											<Badge variant="outline" className={slaBadge.className}>
-												{slaBadge.label}
-											</Badge>
+											<StatusBadge
+												label={slaBadge.label}
+												className={slaBadge.className}
+											/>
 										) : (
-											<Badge variant="secondary">NO DATA</Badge>
+											<StatusBadge label="NO DATA" variant="secondary" />
 										)}
 									</TableCell>
 									<TableCell className="font-mono text-sm">

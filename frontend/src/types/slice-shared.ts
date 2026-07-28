@@ -1,7 +1,9 @@
 // ── Props every slice component receives from the slices.tsx route ────────────
 // Add this to your existing types/slice1.ts (or wherever your slice types live)
 
-import type { SliceKey, SliceTab } from "../components/primitives/SliceSwitcher";
+// frontend/src/types/sliceShared.ts
+
+import type { SliceKey, SliceTab } from "../components/primitives/slice-switcher";
 
 export interface SliceSharedProps {
   /** Full tab list with live slaOk — passed into SliceLayout */
