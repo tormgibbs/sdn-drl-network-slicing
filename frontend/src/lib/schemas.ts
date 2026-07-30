@@ -95,6 +95,7 @@ export const TrafficScenarioRequestSchema = z.object({
 
 export const TrafficStatusSchema = z.object({
 	running: z.boolean(),
+	current_scenario: z.string().nullable(),
 	last_loop: z
 		.object({
 			loop: z.number(),

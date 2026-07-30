@@ -1,34 +1,25 @@
 // frontend/src/hooks/use-traffic-control.ts
-
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-	getTrafficState,
-	postTrafficControl,
-	postTrafficScenario,
-} from "@/lib/api";
-import type { TrafficControlRequest, TrafficStatus } from "@/lib/schemas";
+import { useLiveMetricsStore } from "#/stores/live-metrics-store";
+import { postTrafficControl, postTrafficScenario } from "@/lib/api";
+import type { TrafficControlRequest } from "@/lib/schemas";
 import type { Scenario } from "@/types/slice";
 
 export function useTrafficControl() {
-	const queryClient = useQueryClient();
 	const [pendingScenario, setPendingScenario] = useState<Scenario | null>(null);
-
-	const trafficState = useQuery({
-		queryKey: ["trafficState"],
-		queryFn: getTrafficState,
-		refetchInterval: pendingScenario ? 2500 : 5000,
-	});
+	const trafficStatus = useLiveMetricsStore((s) => s.trafficStatus);
+	const running = trafficStatus?.running ?? false;
+	const currentScenario = trafficStatus?.current_scenario as
+		| Scenario
+		| undefined;
 
 	useEffect(() => {
-		if (
-			pendingScenario &&
-			trafficState.data?.last_loop?.scenario === pendingScenario
-		) {
+		if (pendingScenario && currentScenario === pendingScenario) {
 			setPendingScenario(null);
 		}
-	}, [trafficState.data, pendingScenario]);
+	}, [currentScenario, pendingScenario]);
 
 	const scenarioMutation = useMutation({
 		mutationFn: postTrafficScenario,
@@ -37,30 +28,18 @@ export function useTrafficControl() {
 			toast.error(err.message);
 			setPendingScenario(null);
 		},
-		onSuccess: () =>
-			queryClient.invalidateQueries({ queryKey: ["trafficState"] }),
 	});
 
-	const controlMutation = useMutation<
-		TrafficStatus,
-		Error,
-		TrafficControlRequest
-	>({
+	const controlMutation = useMutation<unknown, Error, TrafficControlRequest>({
 		mutationFn: postTrafficControl,
 		onError: (err) => toast.error(err.message),
-		onSuccess: () =>
-			queryClient.invalidateQueries({ queryKey: ["trafficState"] }),
 	});
-
-	const running = trafficState.data?.running ?? false;
 
 	return {
 		running,
 		isTrafficBusy: controlMutation.isPending,
-		lastLoop: trafficState.data?.last_loop ?? null,
-		scenarioMode: (pendingScenario ?? trafficState.data?.last_loop?.scenario) as
-			| Scenario
-			| undefined,
+		lastLoop: trafficStatus?.last_loop ?? null,
+		scenarioMode: pendingScenario ?? currentScenario,
 		isSwitchingScenario: pendingScenario !== null,
 		switchScenario: (scenario: Scenario) => {
 			if (!running) {

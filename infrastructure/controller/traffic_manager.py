@@ -23,7 +23,12 @@ class TrafficManager:
 
 	def status(self) -> dict:
 		with self._lock:
-			return {'running': self._running, 'last_loop': self._last_loop_result}
+			current_scenario = self._runner.get_current_scenario() if self._runner else None
+			return {
+				'running': self._running,
+				'current_scenario': current_scenario,
+				'last_loop': self._last_loop_result,
+			}
 
 	def _attach_log_file(self) -> Path:
 		_LOG_DIR.mkdir(parents=True, exist_ok=True)

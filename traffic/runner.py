@@ -682,6 +682,7 @@ class TrafficRunner:
 		self._stop_event = threading.Event()
 		self._scenario_lock = threading.Lock()
 		self._scenario_override: str | None = None
+		self._current_scenario: str | None = None
 
 		self._slice_pids: dict[str, int] = {}
 		self._slice_to_imsi: dict[str, str] = {}
@@ -713,6 +714,10 @@ class TrafficRunner:
 			raise ValueError(f'Unknown scenario: {scenario_name!r}')
 		with self._scenario_lock:
 			self._scenario_override = scenario_name
+
+	def get_current_scenario(self) -> str | None:
+		with self._scenario_lock:
+			return self._current_scenario
 
 	def request_stop(self) -> None:
 		self._stop_event.set()
@@ -751,6 +756,9 @@ class TrafficRunner:
 					break
 
 				scenario_name = self._current_scenario_name()
+
+				with self._scenario_lock:
+					self._current_scenario = scenario_name
 
 				if on_loop_start is not None:
 					on_loop_start(loop, scenario_name)
