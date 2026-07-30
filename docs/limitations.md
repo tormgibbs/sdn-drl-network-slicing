@@ -24,6 +24,23 @@ measurement-tooling caveats.
 - **No controlled baseline comparison yet.** The agent's performance has not yet been measured
   side-by-side against the static or heuristic baselines under matched traffic conditions.
 
+- **IoT under-allocation is structural, not undertraining.** Reward-delta analysis
+  (`eval/03_reward_delta_grid.py`) shows the policy leaves reward on the table on `iot`:
+  taking bandwidth away from it never improves reward (0-3.1% win rate across all four
+  counter slices), while giving it more always does (100% win rate, even from the
+  lowest-priority `general` slice). Reproduced across two independently-trained
+  checkpoints (`magnolia`, `maple`, 504K timesteps each) with near-identical numbers,
+  which argues for a converged equilibrium, not incomplete training.
+
+  Likely cause: `iot`'s floor (64 kbps) is under 1% of total capacity, and softmax
+  struggles to express such a small target fraction precisely. The step-size sweep
+  shows a high clip rate (19.6% at delta=0.01, 100% by delta=0.05) when constructing
+  "give iot more" counter-allocations, consistent with a narrow, easy-to-overshoot
+  target region.
+
+  Not tested: whether more training changes this. A fix, if pursued, would likely need
+  a reward-weight or action-space change rather than longer training.
+
 ## Heuristic Baseline
 
 - **No hysteresis.** The rule re-evaluates every step from scratch with no memory of why a slice's
@@ -36,5 +53,5 @@ measurement-tooling caveats.
   are set to match the thesis's illustrative example, not empirically tuned or justified against
   the actual traffic model.
 - **Limited test coverage.** Validated over ~100 steps under one traffic condition (sustained `vle`
-  demand). Not yet tested across the full scenario set (`registration`, `exam_period`, `chaos`, etc.)
+  demand). Not yet tested across the full scenario set (`registration`, `quiz`, `chaos`, etc.)
   the way the DRL agent was via the sim-side eval scripts.
