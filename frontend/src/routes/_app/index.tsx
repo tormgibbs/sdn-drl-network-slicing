@@ -14,7 +14,7 @@ import { useLiveMetricsStore } from "#/stores/live-metrics-store";
 export const Route = createFileRoute("/_app/")({ component: Home });
 
 const DEMO_MODEL_PATH = "models/selected/magnolia";
-const MAX_BW_BPS = 100_000_000; // matches network.total_bandwidth_bps in config/slices.yaml
+const MAX_BW_BPS = 100_000_000;
 
 function Home() {
   const [isSwitchingController, setIsSwitchingController] = useState(false);

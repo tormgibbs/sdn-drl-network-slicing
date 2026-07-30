@@ -75,10 +75,10 @@ traffic_profiles:
   iot:
     pattern: continuous
     protocol: udp
-    target_bps: 64_000
+    target_bps: 150_000
     packet_size: 64
     port: 5201
-    downlink_bps: 32_000
+    downlink_bps: 75_000
     device_count: 4000
   general:
     pattern: continuous
