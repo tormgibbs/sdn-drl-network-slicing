@@ -1,0 +1,8 @@
+Source: models/linden/ppo_slicing_482000.zip (linden final checkpoint, 480,000
+timesteps, +1000-2000 real-network fine-tuning steps, n_epochs=5). Confirmed
+via 500-episode paired sim comparison to be statistically indistinguishable
+from ppo_slicing_480000/magnolia (mean_diff not significant at ~2SE). Real
+fine-tuning had no meaningful effect, positive or negative -- training reward
+during fine-tuning declined sharply due to genuine real-network degradation
+(VLE/student_portal packet loss spikes) during collection, not policy damage.
+Functionally equivalent to magnolia.
