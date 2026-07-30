@@ -9,9 +9,11 @@ import argparse
 
 import numpy as np
 import yaml
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, SAC
 
 from agent.sim_env import SimCampusEnv
+
+_ALGO_CLASSES = {'ppo': PPO, 'sac': SAC}
 
 
 def main() -> None:
@@ -21,17 +23,16 @@ def main() -> None:
 	parser.add_argument('--slices-config', default='config/slices.yaml')
 	parser.add_argument('--model-path', required=True)
 	parser.add_argument('--n-episodes', type=int, default=500)
+	parser.add_argument('--algo', default='ppo', choices=['ppo', 'sac'])
 	parser.add_argument('--slice-a', required=True, help='slice you want stressed')
 	parser.add_argument('--slice-a-min-factor', type=float, default=1.1)
 	parser.add_argument('--slice-b', required=True, help='slice you want NOT stressed')
 	parser.add_argument('--slice-b-max-factor', type=float, default=0.7)
 	args = parser.parse_args()
-
 	slices_cfg = yaml.safe_load(open(args.slices_config))
 	slice_order = slices_cfg['slice_order']
 	env = SimCampusEnv(slices_cfg)
-	model = PPO.load(args.model_path)
-
+	model = _ALGO_CLASSES[args.algo].load(args.model_path)
 	found = 0
 	for _ in range(args.n_episodes):
 		obs, _ = env.reset()
@@ -41,15 +42,12 @@ def main() -> None:
 		b_factor = env._factors[args.slice_b]
 		if not (a_factor > args.slice_a_min_factor and b_factor < args.slice_b_max_factor):
 			continue
-
 		action, _ = model.predict(obs, deterministic=True)
 		exp = np.exp(action)
 		fracs = exp / exp.sum()
 		alloc_str = '  '.join(
 			f'{name}={fracs[i]:.3f}' for i, name in enumerate(slice_order)
 		)
-
-		# DIAGNOSTIC: Print the observation vector to see what the agent actually sees
 		latency = [f'{obs[i]:.2f}' for i in range(0, 15, 3)]
 		loss = [f'{obs[i]:.2f}' for i in range(1, 15, 3)]
 		util = [f'{obs[i]:.2f}' for i in range(2, 15, 3)]
@@ -57,9 +55,7 @@ def main() -> None:
 		print(f'  obs: lat={latency} | loss={loss} | util={util}')
 		print(f'  alloc: {alloc_str}')
 		print('-' * 60)
-
 		found += 1
-
 	print(
 		f'\n{found} matching episodes out of {args.n_episodes} '
 		f'({args.slice_a} stressed >{args.slice_a_min_factor}, '

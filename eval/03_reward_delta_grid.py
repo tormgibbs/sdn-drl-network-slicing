@@ -12,7 +12,7 @@ timers) and would score against a different tick than the policy observed.
 USAGE:
     uv run python 03_reward_delta_grid.py \
         --model-path models/ironwood/ppo_slicing_640000 models/ironwood/ppo_slicing_800000 \
-        --n-episodes 1500
+        --n-episodes 1500 --algo ppo
 """
 
 import argparse
@@ -21,10 +21,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import yaml
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, SAC
 
 from agent.project_allocation import project_allocation
 from agent.sim_env import W1, W2, W3, W4, W5, W6, SimCampusEnv
+
+_ALGO_CLASSES = {'ppo': PPO, 'sac': SAC}
 
 
 def full_reward(rates_kbps, prev_rates_kbps, metrics, slice_order, slices_cfg, C_kbps):
@@ -91,6 +93,7 @@ def run_analysis(
 	sweep_sizes: list[float],
 	n_episodes: int,
 	sweep_episodes: int,
+	algo: str,
 ) -> dict:
 	"""Runs the full delta grid + sweep for one model. Returns a results dict."""
 	slice_order = slices_cfg_full['slice_order']
@@ -101,7 +104,7 @@ def run_analysis(
 	]
 	counters = parse_counters(counter_pairs, slice_order)
 
-	model = PPO.load(model_path)
+	model = _ALGO_CLASSES[algo].load(model_path)
 	env = SimCampusEnv(slices_cfg_full)
 
 	counter_wins = {k: 0 for k in counters}
@@ -192,6 +195,7 @@ def main() -> None:
 		help='one or more checkpoint paths, evaluated in parallel',
 	)
 	parser.add_argument('--n-episodes', type=int, default=2000)
+	parser.add_argument('--algo', default='ppo', choices=['ppo', 'sac'])
 	parser.add_argument(
 		'--counters',
 		nargs='+',
@@ -215,7 +219,7 @@ def main() -> None:
 	slices_cfg_full = yaml.safe_load(open(args.slices_config))
 	max_workers = args.max_workers or min(len(args.model_path), os.cpu_count() or 1)
 	print(
-		f'Running {len(args.model_path)} model(s) across {max_workers} workers...',
+		f'Running {len(args.model_path)} model(s) across {max_workers} workers (algo={args.algo})...',
 		flush=True,
 	)
 
@@ -231,6 +235,7 @@ def main() -> None:
 				args.sweep_sizes,
 				args.n_episodes,
 				args.sweep_episodes,
+				args.algo,
 			): path
 			for path in args.model_path
 		}

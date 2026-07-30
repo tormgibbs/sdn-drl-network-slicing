@@ -283,7 +283,8 @@ async def controller_switch(body: dict):
 			model_path = body.get('model_path')
 			if not model_path:
 				raise HTTPException(status_code=422, detail='model_path required for agent')
-			await run_in_threadpool(am.start, model_path, body.get('vecnorm_path'))
+			algo = body.get('algo', 'ppo')
+			await run_in_threadpool(am.start, model_path, body.get('vecnorm_path'), algo)
 		elif target == 'heuristic':
 			await run_in_threadpool(hm.start)
 

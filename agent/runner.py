@@ -7,13 +7,14 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from agent.env import CampusSlicingEnv
 
 logger = logging.getLogger(__name__)
+_ALGO_CLASSES = {'ppo': PPO, 'sac': SAC}
 
 
 class StepResult:
@@ -38,8 +39,16 @@ class StepResult:
 
 class AgentRunner:
 	def __init__(
-		self, slices_config: dict, model_path: str, vecnorm_path: str | None = None
+		self,
+		slices_config: dict,
+		model_path: str,
+		vecnorm_path: str | None = None,
+		algo: str = 'ppo',
 	):
+		algo = algo.lower()
+		if algo not in _ALGO_CLASSES:
+			raise ValueError(f'Unknown algo {algo!r}, expected one of {list(_ALGO_CLASSES)}')
+
 		if not model_path.endswith('.zip'):
 			model_path = model_path + '.zip'
 
@@ -54,7 +63,7 @@ class AgentRunner:
 			vec_env.norm_reward = False
 
 		self._vec_env = vec_env
-		self._model = PPO.load(model_path, env=vec_env)
+		self._model = _ALGO_CLASSES[algo].load(model_path, env=vec_env)
 		self._stop_requested = False
 		self._step_count = 0
 

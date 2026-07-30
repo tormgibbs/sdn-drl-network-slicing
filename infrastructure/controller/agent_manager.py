@@ -28,7 +28,9 @@ class AgentManager:
 		with self._lock:
 			return {'running': self._running, 'last_result': self._last_result}
 
-	def start(self, model_path: str, vecnorm_path: str | None = None) -> None:
+	def start(
+		self, model_path: str, vecnorm_path: str | None = None, algo: str = 'ppo'
+	) -> None:
 		with self._lock:
 			if self._running:
 				raise RuntimeError('Agent already running')
@@ -37,7 +39,7 @@ class AgentManager:
 		try:
 			with open(_SLICES_CONFIG_PATH) as f:
 				slices_config = yaml.safe_load(f)
-			runner = AgentRunner(slices_config, model_path, vecnorm_path)
+			runner = AgentRunner(slices_config, model_path, vecnorm_path, algo=algo)
 		except Exception:
 			with self._lock:
 				self._running = False
@@ -48,7 +50,7 @@ class AgentManager:
 			self._runner = runner
 
 		hub.spawn(self._run_loop)
-		logger.info('AgentManager: started, model=%s', model_path)
+		logger.info('AgentManager: started, model=%s algo=%s', model_path, algo)
 
 	def stop(self) -> None:
 		with self._lock:
