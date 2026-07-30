@@ -72,7 +72,7 @@ export function HistoryTable({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{rows.map((row, idx) => {
+						{[...rows].reverse().map((row, idx) => {
 							const isViolation = row.sla === "VIOLATION";
 							return (
 								<TableRow key={row.id + idx}>
