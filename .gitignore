@@ -18,3 +18,7 @@ config/slice_pids.json
 models/*
 !models/selected/
 !models/selected/*
+
+models_sac/*
+!models_sac/selected/
+!models_sac/selected/*

@@ -1,0 +1,6 @@
+Source: models/linden/final.zip (resumed from 480,000 timesteps, +1000 real
+timesteps, 1 rollout). Fine-tuned live on real traffic (general_spike). VLE and
+student_portal saw severe real packet loss during this window (VLE loss_pct up
+to 94%) confirmed as a genuine network condition, not a measurement bug.
+Rewards were deeply negative throughout. Treat as fine-tuned under an
+atypically bad network window, not representative conditions.
