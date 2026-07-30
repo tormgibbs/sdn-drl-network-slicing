@@ -15,7 +15,7 @@ scenarios:
     admin: { ul_factor_range: [1.20, 1.50], dl_factor_range: [1.20, 1.50] }
     iot: { ul_factor_range: [0.60, 0.80], dl_factor_range: [0.60, 0.80] }
     general: { ul_factor_range: [0.60, 0.80], dl_factor_range: [0.60, 0.80] }
-  exam_period:
+  quiz:
     vle: { ul_factor_range: [1.20, 1.60], dl_factor_range: [1.20, 1.60] }
     student_portal: { ul_factor_range: [0.50, 0.70], dl_factor_range: [0.50, 0.70] }
     admin: { ul_factor_range: [1.00, 1.20], dl_factor_range: [1.00, 1.20] }

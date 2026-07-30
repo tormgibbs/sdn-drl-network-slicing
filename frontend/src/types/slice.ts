@@ -5,7 +5,7 @@ export type SliceKey = "vle" | "student_portal" | "admin" | "iot" | "general";
 export type SliceName = SliceKey; // alias — newer naming used elsewhere in the codebase
 
 export type Mode = "agent" | "static" | "heuristic";
-export type Scenario = "normal" | "registration" | "exam_period" | "general_spike" | "chaos";
+export type Scenario = "normal" | "registration" | "quiz" | "general_spike" | "chaos";
 export type SLAStatus = "NOMINAL" | "WARNING" | "VIOLATION";
 
 export type { Metric, SliceConfig } from "#/lib/schemas";
