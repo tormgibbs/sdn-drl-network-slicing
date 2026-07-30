@@ -287,6 +287,12 @@ async def controller_switch(body: dict):
 			await run_in_threadpool(am.start, model_path, body.get('vecnorm_path'), algo)
 		elif target == 'heuristic':
 			await run_in_threadpool(hm.start)
+		elif target == 'static':
+			mm = registry.meter_manager
+			if mm is None:
+				raise HTTPException(status_code=503, detail='Meter manager not available')
+			equal_frac = {name: 1.0 / len(mm.slice_names) for name in mm.slice_names}
+			await run_in_threadpool(mm.install_meters, equal_frac)
 
 		return {
 			'status': 'ok',
