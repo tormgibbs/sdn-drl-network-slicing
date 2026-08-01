@@ -24,7 +24,6 @@ function Home() {
   const metricsHistory = useLiveMetricsStore((s) => s.metricsHistory);
   const activeController = useLiveMetricsStore((s) => s.activeController);
   const agent = useLiveMetricsStore((s) => s.agent);
-  const heuristicHistory = useLiveMetricsStore((s) => s.heuristicHistory);
 
   const sliceKeys = Object.keys(initialData.slices) as Array<keyof typeof initialData.slices>;
 
@@ -59,10 +58,7 @@ function Home() {
   const slaSatisfaction = ((nominalCount / sliceKeys.length) * 100).toFixed(1);
 
   const reward = agent?.reward ?? null;
-  const triggerCount = heuristicHistory.reduce(
-    (sum, p) => sum + p.triggered.length,
-    0,
-  );
+  const triggerCount = useLiveMetricsStore((s) => s.totalTriggerCount);
 
   const handleControllerChange = async (controller: ActiveController) => {
     setIsSwitchingController(true);

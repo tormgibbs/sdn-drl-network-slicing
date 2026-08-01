@@ -60,6 +60,7 @@ interface LiveMetricsState {
 
 	heuristic: HeuristicState | null;
 	heuristicHistory: HeuristicHistoryPoint[];
+	totalTriggerCount: number;
 	setHeuristicState: (h: HeuristicState | null) => void;
 }
 
@@ -120,6 +121,7 @@ export const useLiveMetricsStore = create<LiveMetricsState>((set) => ({
 
 	heuristic: null,
 	heuristicHistory: [],
+	totalTriggerCount: 0,
 	setHeuristicState: (h) =>
 		set((state) => {
 			if (h === null) return { heuristic: null };
@@ -134,6 +136,7 @@ export const useLiveMetricsStore = create<LiveMetricsState>((set) => ({
 				heuristicHistory: [...state.heuristicHistory, point].slice(
 					-HEURISTIC_HISTORY_LIMIT,
 				),
+				totalTriggerCount: state.totalTriggerCount + h.triggered.length,
 			};
 		}),
 }));
